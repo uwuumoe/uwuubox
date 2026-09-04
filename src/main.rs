@@ -13,6 +13,7 @@ mod mime;
 mod oidc;
 mod ratelimit;
 mod routes;
+mod scan;
 mod state;
 mod storage;
 mod views;

@@ -25,6 +25,8 @@ pub enum AppError {
     TooLarge { max_bytes: i64 },
     #[error("unsupported media type: {mime}")]
     UnsupportedMedia { mime: String },
+    #[error("{0}")]
+    Unprocessable(String),
     #[error("rate limited")]
     RateLimited,
     #[error("internal error: {0}")]
@@ -57,6 +59,7 @@ impl AppError {
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::TooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
             Self::UnsupportedMedia { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            Self::Unprocessable(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -70,6 +73,7 @@ impl AppError {
             Self::NotFound => "not_found",
             Self::TooLarge { .. } => "too_large",
             Self::UnsupportedMedia { .. } => "unsupported_media_type",
+            Self::Unprocessable(_) => "unprocessable",
             Self::RateLimited => "rate_limited",
             Self::Internal(_) => "internal_error",
         }
@@ -118,6 +122,7 @@ impl IntoResponse for AppError {
                 ("unsupported media", format!("refusing to serve {mime}"))
             }
             Self::RateLimited => ("too many requests", "slow down and retry later".into()),
+            Self::Unprocessable(m) => ("rejected", m.clone()),
             Self::Internal(m) => ("internal error", m.clone()),
         };
         (status, error_page(status, title, &detail)).into_response()
@@ -138,6 +143,9 @@ impl IntoResponse for JsonError {
             }
             AppError::UnsupportedMedia { mime } => {
                 json!({"error": "unsupported_media_type", "mime": mime})
+            }
+            AppError::Unprocessable(m) => {
+                json!({"error": "unprocessable", "message": m})
             }
             AppError::RateLimited => json!({"error": "rate_limited"}),
         };
