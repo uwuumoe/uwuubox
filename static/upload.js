@@ -41,6 +41,9 @@
       if (xhr.status >= 200 && xhr.status < 300 && body && body.preview_url) {
         var html = '<p>uploaded: <a href="' + esc(body.preview_url) + '">' + esc(body.preview_url) + "</a></p>";
         html += '<p class="hint">raw: <a href="' + esc(body.raw_url) + '">' + esc(body.raw_url) + "</a></p>";
+        if (body.exif_stripped) {
+          html += '<p class="hint">image metadata stripped before storage</p>';
+        }
         if (body.delete_token) {
           html += '<p class="hint">delete token (shown once): <code>' + esc(body.delete_token) + "</code></p>";
         }

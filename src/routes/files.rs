@@ -4,22 +4,27 @@
 //! canonical link always uses the stored ext).
 
 use axum::{
-    extract::{Path, State},
-    http::{header::*, HeaderMap},
+    extract::{Form, Path, Query, State},
+    http::{header::*, HeaderMap, StatusCode},
     response::{IntoResponse, Json, Response},
 };
+use bytes::Bytes;
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
+use sqlx::PgPool;
 use tower_sessions::Session;
 
 use crate::{
+    auth,
     db::{self, FileRow},
     error::{AppError, JsonError},
     identity::current_user,
     ids, mime,
+    range::{self, RangeOutcome},
     routes::common::{check_delete_access, file_kind},
     state::AppState,
+    storage::Store,
     views::{human_bytes, human_time, FilePreviewPage},
 };
 
@@ -39,8 +44,31 @@ async fn load_live_file(state: &AppState, segment: &str) -> Result<FileRow, AppE
     Ok(f)
 }
 
-fn raw_response(file: &FileRow, bytes: &[u8]) -> Result<Response, AppError> {
-    let inline = mime::should_inline(&file.mime_stored, bytes);
+fn unlock_key(file: &FileRow) -> String {
+    format!("uwu_unlock_{}", file.id_core.trim_end())
+}
+
+async fn is_unlocked(session: &Session, file: &FileRow) -> bool {
+    if file.access_password_hash.is_none() {
+        return true;
+    }
+    session
+        .get::<bool>(&unlock_key(file))
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(false)
+}
+
+fn raw_response(
+    file: &FileRow,
+    outcome: RangeOutcome,
+    full_len: u64,
+    bytes: Bytes,
+) -> Result<Response, AppError> {
+    // text/plain is only persisted when the complete upload was valid UTF-8,
+    // so a ranged slice splitting a multibyte character remains safe to serve.
+    let inline = mime::should_inline(&file.mime_stored, &[]);
     let content_type = if inline {
         file.mime_stored.clone()
     } else {
@@ -50,22 +78,29 @@ fn raw_response(file: &FileRow, bytes: &[u8]) -> Result<Response, AppError> {
         .parse()
         .map_err(|_| AppError::internal("bad stored mime"))?;
 
-    let mut builder = Response::builder()
-        .header(CONTENT_TYPE, content_type)
-        .header(CONTENT_LENGTH, bytes.len())
-        .header("X-Content-Type-Options", "nosniff")
-        .header("Content-Security-Policy", "sandbox")
-        .header(CACHE_CONTROL, "public, max-age=86400");
+    let mut response = range::response(outcome, full_len, bytes);
+    let headers = response.headers_mut();
+    headers.insert(CONTENT_TYPE, content_type);
+    headers.insert("X-Content-Type-Options", "nosniff".parse().unwrap());
+    headers.insert("Content-Security-Policy", "sandbox".parse().unwrap());
+    headers.insert(
+        CACHE_CONTROL,
+        if file.burn_after_read || file.access_password_hash.is_some() {
+            "private, no-store"
+        } else {
+            "public, max-age=86400"
+        }
+        .parse()
+        .unwrap(),
+    );
     if !inline {
         let name = mime::sanitize_filename(&file.original_name);
         let disp: axum::http::HeaderValue = format!("attachment; filename=\"{name}\"")
             .parse()
             .map_err(|_| AppError::internal("bad filename"))?;
-        builder = builder.header(CONTENT_DISPOSITION, disp);
+        headers.insert(CONTENT_DISPOSITION, disp);
     }
-    builder
-        .body(axum::body::Body::from(bytes.to_vec()))
-        .map_err(|e| AppError::internal(e.to_string()))
+    Ok(response)
 }
 
 pub async fn preview(
@@ -88,8 +123,14 @@ pub async fn preview(
         (Some(u), Some(o)) => u.id == o,
         _ => false,
     };
+    let unlocked = is_unlocked(&session, &file).await;
+    let protected_and_locked = file.access_password_hash.is_some() && !unlocked;
     let kind = file_kind(&file.mime_stored);
-    let text_snippet = if kind == "text" && file.size_bytes <= TEXT_PREVIEW_LIMIT {
+    let text_snippet = if !file.burn_after_read
+        && !protected_and_locked
+        && kind == "text"
+        && file.size_bytes <= TEXT_PREVIEW_LIMIT
+    {
         match state.store.get(&file.storage_key).await {
             Ok(b) => Some(String::from_utf8_lossy(&b).chars().take(20_000).collect()),
             Err(_) => None,
@@ -97,12 +138,16 @@ pub async fn preview(
     } else {
         None
     };
-    let raw_url = format!(
-        "{}/{}{}",
-        state.env.base_url,
-        file.id_core.trim_end(),
-        file.ext
-    );
+    let raw_url = if protected_and_locked {
+        String::new()
+    } else {
+        format!(
+            "{}/{}{}",
+            state.env.base_url,
+            file.id_core.trim_end(),
+            file.ext
+        )
+    };
     let preview_url = format!(
         "{}/f/{}{}",
         state.env.base_url,
@@ -130,18 +175,109 @@ pub async fn preview(
         .map(axum::response::Html)
 }
 
+#[derive(Default, Deserialize)]
+pub struct RawQuery {
+    pub password: Option<String>,
+}
+
 pub async fn raw(
     State(state): State<AppState>,
+    session: Session,
+    headers: HeaderMap,
+    Query(query): Query<RawQuery>,
     Path(segment): Path<String>,
 ) -> Result<Response, AppError> {
     let file = load_live_file(&state, &segment).await?;
-    // Missing key on download → 404 page, never 500.
-    let bytes = match state.store.get(&file.storage_key).await {
-        Ok(b) => b,
-        Err(crate::storage::StorageError::NotFound(_)) => return Err(AppError::NotFound),
-        Err(e) => return Err(AppError::from(e)),
+    if let Some(hash) = file.access_password_hash.as_deref() {
+        let session_unlocked = is_unlocked(&session, &file).await;
+        let query_unlocked = query
+            .password
+            .as_deref()
+            .is_some_and(|password| auth::verify_password(hash, password));
+        if !session_unlocked && !query_unlocked {
+            return Err(AppError::Unauthorized);
+        }
+    }
+
+    let range_header = match headers.get(RANGE) {
+        Some(value) => Some(
+            value
+                .to_str()
+                .map_err(|_| AppError::bad_request("invalid Range header"))?,
+        ),
+        None => None,
     };
-    raw_response(&file, &bytes)
+    let full_len = u64::try_from(file.size_bytes)
+        .map_err(|_| AppError::internal("negative stored file size"))?;
+    let outcome = range::parse(range_header, full_len);
+    if outcome == RangeOutcome::Invalid {
+        return Err(AppError::bad_request("invalid Range header"));
+    }
+    if outcome == RangeOutcome::Unsatisfiable {
+        return raw_response(&file, outcome, full_len, Bytes::new());
+    }
+
+    if file.burn_after_read {
+        // Fetch first so a transient storage failure does not consume the
+        // one successful read. The following DELETE is the atomic winner.
+        let all = state.store.get(&file.storage_key).await?;
+        if all.len() as u64 != full_len {
+            return Err(AppError::internal("stored object size mismatch"));
+        }
+        if !remove_file(&state, &file).await? {
+            return Err(AppError::NotFound);
+        }
+        let body = match outcome {
+            RangeOutcome::Full => all,
+            RangeOutcome::Satisfiable { start, end } => {
+                let start = usize::try_from(start)
+                    .map_err(|_| AppError::internal("range offset is too large"))?;
+                let end = usize::try_from(end + 1)
+                    .map_err(|_| AppError::internal("range offset is too large"))?;
+                all.slice(start..end)
+            }
+            RangeOutcome::Invalid | RangeOutcome::Unsatisfiable => unreachable!(),
+        };
+        return raw_response(&file, outcome, full_len, body);
+    }
+
+    let body = match outcome {
+        RangeOutcome::Full => state.store.get(&file.storage_key).await?,
+        RangeOutcome::Satisfiable { start, end } => {
+            state
+                .store
+                .get_range(&file.storage_key, start, end - start + 1)
+                .await?
+        }
+        RangeOutcome::Invalid | RangeOutcome::Unsatisfiable => unreachable!(),
+    };
+    raw_response(&file, outcome, full_len, body)
+}
+
+#[derive(Deserialize)]
+pub struct UnlockBody {
+    pub password: String,
+}
+
+pub async fn unlock(
+    State(state): State<AppState>,
+    session: Session,
+    Path(segment): Path<String>,
+    Form(body): Form<UnlockBody>,
+) -> Result<Response, AppError> {
+    let file = load_live_file(&state, &segment).await?;
+    if let Some(hash) = file.access_password_hash.as_deref() {
+        if !auth::verify_password(hash, &body.password) {
+            return Err(AppError::Unauthorized);
+        }
+        let key = unlock_key(&file);
+        session
+            .insert(&key, true)
+            .await
+            .map_err(|e| AppError::internal(e.to_string()))?;
+    }
+    let location = format!("/f/{}{}", file.id_core.trim_end(), file.ext);
+    Ok((StatusCode::SEE_OTHER, [(LOCATION, location)], "").into_response())
 }
 
 #[derive(Deserialize)]
@@ -149,14 +285,49 @@ pub struct DeleteBody {
     pub delete_token: Option<String>,
 }
 
-/// Remove object then row; shared by the JSON API and dashboard form posts.
-pub async fn remove_file(state: &AppState, row: &FileRow) -> Result<(), AppError> {
-    state.store.delete(&row.storage_key).await?;
-    sqlx::query("DELETE FROM files WHERE id_core = $1")
-        .bind(&row.id_core)
-        .execute(&state.pool)
-        .await?;
-    Ok(())
+pub trait FileRemovalContext {
+    fn pool(&self) -> &PgPool;
+    fn store(&self) -> &Store;
+}
+
+impl FileRemovalContext for AppState {
+    fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
+    fn store(&self) -> &Store {
+        &self.store
+    }
+}
+
+impl<'a> FileRemovalContext for (&'a PgPool, &'a Store) {
+    fn pool(&self) -> &PgPool {
+        self.0
+    }
+
+    fn store(&self) -> &Store {
+        self.1
+    }
+}
+
+/// Atomically remove one file row and release its shared backing object.
+/// `false` means another request already removed the row.
+pub async fn remove_file<C: FileRemovalContext + ?Sized>(
+    context: &C,
+    row: &FileRow,
+) -> Result<bool, AppError> {
+    let storage_key: Option<String> =
+        sqlx::query_scalar("DELETE FROM files WHERE id_core = $1 RETURNING storage_key")
+            .bind(&row.id_core)
+            .fetch_optional(context.pool())
+            .await?;
+    let Some(storage_key) = storage_key else {
+        return Ok(false);
+    };
+    if db::release_object(context.pool(), &storage_key).await? {
+        context.store().delete(&storage_key).await?;
+    }
+    Ok(true)
 }
 
 pub async fn delete_file(

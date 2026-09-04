@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
 use std::path::PathBuf;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -25,6 +26,7 @@ pub enum StorageError {
 pub trait ObjectStore: Clone + Send + Sync + 'static {
     async fn put(&self, key: &str, bytes: Bytes, content_type: &str) -> Result<(), StorageError>;
     async fn get(&self, key: &str) -> Result<Bytes, StorageError>;
+    async fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Bytes, StorageError>;
     async fn delete(&self, key: &str) -> Result<(), StorageError>;
 }
 
@@ -101,6 +103,31 @@ impl ObjectStore for LocalStore {
             Err(e) => Err(StorageError::Backend(e.to_string())),
         }
     }
+    async fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Bytes, StorageError> {
+        assert_safe_key(key);
+        if len == 0 {
+            return Ok(Bytes::new());
+        }
+        let size = usize::try_from(len)
+            .map_err(|_| StorageError::Backend("requested range is too large".into()))?;
+        let path = self.root.join(key);
+        let mut file = match tokio::fs::File::open(path).await {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(StorageError::NotFound(key.into()))
+            }
+            Err(e) => return Err(StorageError::Backend(e.to_string())),
+        };
+        file.seek(std::io::SeekFrom::Start(offset))
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+        let mut bytes = vec![0; size];
+        file.read_exact(&mut bytes)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+        Ok(Bytes::from(bytes))
+    }
+
 
     async fn delete(&self, key: &str) -> Result<(), StorageError> {
         assert_safe_key(key);
@@ -161,6 +188,44 @@ impl ObjectStore for S3Store {
             .map(|b| b.into_bytes())
             .map_err(|e| StorageError::Backend(e.to_string()))
     }
+    async fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Bytes, StorageError> {
+        assert_safe_key(key);
+        if len == 0 {
+            return Ok(Bytes::new());
+        }
+        let end = offset
+            .checked_add(len - 1)
+            .ok_or_else(|| StorageError::Backend("requested range overflow".into()))?;
+        let out = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .range(format!("bytes={offset}-{end}"))
+            .send()
+            .await
+            .map_err(|e| {
+                if is_s3_not_found(&e) {
+                    StorageError::NotFound(key.into())
+                } else {
+                    StorageError::Backend(e.to_string())
+                }
+            })?;
+        let bytes = out
+            .body
+            .collect()
+            .await
+            .map(|b| b.into_bytes())
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+        if bytes.len() as u64 != len {
+            return Err(StorageError::Backend(format!(
+                "short ranged read: expected {len} bytes, got {}",
+                bytes.len()
+            )));
+        }
+        Ok(bytes)
+    }
+
 
     async fn delete(&self, key: &str) -> Result<(), StorageError> {
         assert_safe_key(key);
@@ -229,6 +294,18 @@ impl Store {
             Self::S3(s) => s.get(key).await,
         }
     }
+    pub async fn get_range(
+        &self,
+        key: &str,
+        offset: u64,
+        len: u64,
+    ) -> Result<Bytes, StorageError> {
+        match self {
+            Self::Local(s) => s.get_range(key, offset, len).await,
+            Self::S3(s) => s.get_range(key, offset, len).await,
+        }
+    }
+
 
     pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
         match self {

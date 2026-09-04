@@ -6,8 +6,16 @@
 <meta property="og:type" content="website">
 <meta property="og:url" content="{{ preview_url }}">
 {% if kind == "image" %}
+{% if file.burn_after_read %}
+{% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
+<meta name="twitter:card" content="summary">
+{% else if raw_url.is_empty() %}
+{% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
+<meta name="twitter:card" content="summary">
+{% else %}
 <meta property="og:image" content="{{ raw_url }}">
 <meta name="twitter:card" content="summary_large_image">
+{% endif %}
 {% else %}
 {% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
 <meta name="twitter:card" content="summary">
@@ -25,6 +33,17 @@
 {% endmatch %}
 </ul>
 {% if is_owner %}<p class="hint">you own this file — <a href="/account">manage it</a>.</p>{% endif %}
+{% if file.burn_after_read %}<p class="notice"><strong>burn after read</strong> — the first successful download permanently removes this file.</p>{% endif %}
+{% if raw_url.is_empty() %}
+<form action="{{ preview_url }}/unlock" method="post">
+<label class="field">password
+<input type="password" name="password" minlength="8" maxlength="72" autocomplete="current-password" required>
+</label>
+<button type="submit">unlock</button>
+</form>
+{% else if file.burn_after_read %}
+<p><a class="button" href="{{ raw_url }}" download>download once</a></p>
+{% else %}
 <div class="preview">
 {% if kind == "image" %}
 <img src="{{ raw_url }}" alt="{{ file.original_name }}">
@@ -41,4 +60,5 @@
 </div>
 <p><a class="button" href="{{ raw_url }}" download>download</a>
 <a class="button ghost" href="{{ raw_url }}">raw link</a></p>
+{% endif %}
 {% endblock %}

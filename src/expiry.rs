@@ -1,10 +1,9 @@
-//! Expiry sweeper: every 300s, delete objects then rows for expired
-//! files/pastes in 500-row batches. Object-delete failure keeps the row for
-//! retry; row delete only follows a successful object delete.
+//! Expiry sweeper: every 300s, atomically delete expired rows and release
+//! their shared backing objects in 500-row batches.
 
 use sqlx::PgPool;
 
-use crate::{db, storage::Store};
+use crate::{db, routes::files::remove_file, storage::Store};
 
 pub async fn run_once(
     pool: &PgPool,
@@ -16,22 +15,12 @@ pub async fn run_once(
 
     match db::expired_files(pool, 500).await {
         Ok(rows) => {
-            for f in rows {
-                match store.delete(&f.storage_key).await {
-                    Ok(()) => {
-                        match sqlx::query("DELETE FROM files WHERE id_core = $1")
-                            .bind(&f.id_core)
-                            .execute(pool)
-                            .await
-                        {
-                            Ok(_) => files += 1,
-                            Err(e) => {
-                                tracing::error!(core = %f.id_core, error = %e, "expiry: row delete failed")
-                            }
-                        }
-                    }
+            for file in rows {
+                match remove_file(&(pool, store), &file).await {
+                    Ok(true) => files += 1,
+                    Ok(false) => {}
                     Err(e) => {
-                        tracing::warn!(core = %f.id_core, error = %e, "expiry: object delete failed; row kept")
+                        tracing::error!(core = %file.id_core, error = %e, "expiry: file removal failed")
                     }
                 }
             }

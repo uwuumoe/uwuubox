@@ -21,10 +21,18 @@
 {% if max_expiry_secs >= 2592000 %}<option value="2592000">30 days</option>{% endif %}
 </select>
 </label>
+<label class="field inline"><input type="checkbox" name="visibility" value="public"> publicly list this upload</label>
+<input type="hidden" name="strip_exif" value="false">
 {% match user %}
-{% when Some with (_) %}
-<label class="field inline"><input type="checkbox" name="visibility" value="public"> list on my public profile</label>
-{% when None %}{% endmatch %}
+{% when Some with (u) %}
+<label class="field inline"><input type="checkbox" name="strip_exif" value="true"{% if u.strip_exif_default %} checked{% endif %}> strip image metadata</label>
+{% when None %}
+<label class="field inline"><input type="checkbox" name="strip_exif" value="true"> strip image metadata</label>
+{% endmatch %}
+<label class="field inline"><input type="checkbox" name="burn_after_read" value="true"> burn after first download</label>
+<label class="field">access password (optional)
+<input type="password" name="access_password" minlength="8" maxlength="72" autocomplete="new-password">
+</label>
 <button type="submit">upload</button>
 </form>
 <progress id="bar" max="100" value="0" hidden></progress>
