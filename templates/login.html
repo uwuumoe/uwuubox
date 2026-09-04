@@ -1,5 +1,6 @@
 {% extends "layout.html" %}
 {% block title %}{{ mode }} · {{ instance_name }}{% endblock %}
+{% block head %}<script src="/static/passkey.js" defer></script>{% endblock %}
 {% block content %}
 {% if mode == "register" %}<h1>register</h1>{% else %}<h1>log in</h1>{% endif %}
 {% match error %}
@@ -14,6 +15,17 @@
 </label>
 <button type="submit">{% if mode == "register" %}create account{% else %}log in{% endif %}</button>
 </form>
+{% if mode == "login" %}
+<h2>use a passkey</h2>
+<form id="passkey-login">
+<label class="field">username
+<input type="text" name="username" autocomplete="username webauthn" minlength="3" maxlength="24" required>
+</label>
+<button type="submit">log in with a passkey</button>
+</form>
+<p id="passkey-status" class="hint" role="status"></p>
+<p class="hint"><a href="/forgot">forgot your password?</a></p>
+{% endif %}
 {% if oidc_enabled %}
 <p><a class="button ghost" href="/oidc/login">continue with single sign-on</a></p>
 {% endif %}

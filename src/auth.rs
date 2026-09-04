@@ -100,6 +100,10 @@ pub fn new_delete_token() -> String {
     format!("uwu-del-{}", random_alnum(32))
 }
 
+pub fn new_reset_token() -> String {
+    format!("uwu-rst-{}", random_alnum(32))
+}
+
 pub fn peppered_hash(domain: &str, secret: &[u8; 32], token: &str) -> String {
     let mut h = Sha256::new();
     h.update(domain.as_bytes());
@@ -116,6 +120,10 @@ pub fn api_token_hash(secret: &[u8; 32], token: &str) -> String {
 
 pub fn delete_token_hash(secret: &[u8; 32], token: &str) -> String {
     peppered_hash("delete-token-v1", secret, token)
+}
+
+pub fn reset_token_hash(secret: &[u8; 32], token: &str) -> String {
+    peppered_hash("reset-v1", secret, token)
 }
 
 pub fn tokens_equal(a: &str, b: &str) -> bool {
@@ -179,5 +187,18 @@ mod tests {
             &api_token_hash(&s1, &t),
             &api_token_hash(&s2, &t)
         ));
+    }
+
+    #[test]
+    fn reset_tokens_have_a_separate_domain() {
+        let secret = [7u8; 32];
+        let token = new_reset_token();
+        assert_eq!(token.len(), 40);
+        assert!(token.starts_with("uwu-rst-"));
+        assert!(token[8..].bytes().all(|byte| byte.is_ascii_alphanumeric()));
+        assert_ne!(
+            reset_token_hash(&secret, &token),
+            api_token_hash(&secret, &token)
+        );
     }
 }
