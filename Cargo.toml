@@ -41,3 +41,14 @@ thiserror = { version = "2" }
 subtle = { version = "2" }
 serde_urlencoded = { version = "0.7" }
 aws-credential-types = { version = "1" }
+zip = { version = "2" }
+pulldown-cmark = { version = "0.12" }
+ammonia = { version = "4" }
+lettre = { version = "0.11", default-features = false, features = ["builder", "tokio1", "tokio1-rustls", "smtp-transport", "rustls-tls"] }
+webauthn-rs = { version = "0.5" }
+prometheus = { version = "0.13" }
+tracing-opentelemetry = { version = "0.29" }
+opentelemetry = { version = "0.28" }
+opentelemetry-otlp = { version = "0.28" }
+opentelemetry_sdk = { version = "0.28", features = ["trace", "rt-tokio"] }
+img-parts = { version = "0.3" }

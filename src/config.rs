@@ -40,6 +40,16 @@ pub struct Env {
     pub oidc_client_secret: Option<String>,
     pub oidc_redirect_url: Option<String>,
     pub base_url: String,
+    pub smtp_host: Option<String>,
+    pub smtp_port: u16,
+    pub smtp_user: Option<String>,
+    pub smtp_pass: Option<String>,
+    pub smtp_from: Option<String>,
+    pub smtp_starttls: bool,
+    pub scan_command: Option<String>,
+    pub scan_timeout_secs: u64,
+    pub scan_fail_open: bool,
+    pub otel_endpoint: Option<String>,
 }
 
 fn var(name: &'static str) -> Result<Option<String>, ConfigError> {
@@ -155,7 +165,6 @@ impl Env {
                 return Err(ConfigError::Missing("UWUU_OIDC_REDIRECT_URL"));
             }
         }
-
         let base_url = var("UWUU_BASE_URL")?
             .map(|mut u| {
                 while u.ends_with('/') {
@@ -165,6 +174,30 @@ impl Env {
             })
             .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
 
+        let smtp_host = var("UWUU_SMTP_HOST")?;
+        let smtp_port: u16 = match var("UWUU_SMTP_PORT")? {
+            None => 587,
+            Some(v) => v
+                .parse()
+                .map_err(|_| ConfigError::Invalid("UWUU_SMTP_PORT", v.clone()))?,
+        };
+        let smtp_user = var("UWUU_SMTP_USER")?;
+        let smtp_pass = var("UWUU_SMTP_PASS")?;
+        let smtp_from = var("UWUU_SMTP_FROM")?;
+        let smtp_starttls = flag("UWUU_SMTP_STARTTLS", true)?;
+        if smtp_host.is_some() && smtp_from.is_none() {
+            return Err(ConfigError::Missing("UWUU_SMTP_FROM"));
+        }
+
+        let scan_command = var("UWUU_SCAN_COMMAND")?;
+        let scan_timeout_secs: u64 = match var("UWUU_SCAN_TIMEOUT_SECS")? {
+            None => 30,
+            Some(v) => v
+                .parse()
+                .map_err(|_| ConfigError::Invalid("UWUU_SCAN_TIMEOUT_SECS", v.clone()))?,
+        };
+        let scan_fail_open = flag("UWUU_SCAN_FAIL_OPEN", false)?;
+        let otel_endpoint = var("UWUU_OTEL_ENDPOINT")?;
         Ok(Self {
             database_url,
             port,
@@ -183,6 +216,16 @@ impl Env {
             oidc_client_secret,
             oidc_redirect_url,
             base_url,
+            smtp_host,
+            smtp_port,
+            smtp_user,
+            smtp_pass,
+            smtp_from,
+            smtp_starttls,
+            scan_command,
+            scan_timeout_secs,
+            scan_fail_open,
+            otel_endpoint,
         })
     }
 }
@@ -204,6 +247,9 @@ pub struct InstanceConfig {
     pub allow_local_login: bool,
     pub allow_oidc: bool,
     pub anonymous_max_bytes: i64,
+    pub registration_mode: String,
+    pub scan_uploads: bool,
+    pub block_encrypted_archives: bool,
 }
 
 impl Default for InstanceConfig {
@@ -223,6 +269,9 @@ impl Default for InstanceConfig {
             allow_local_login: true,
             allow_oidc: false,
             anonymous_max_bytes: 26_214_400,
+            registration_mode: "open".into(),
+            scan_uploads: false,
+            block_encrypted_archives: false,
         }
     }
 }
@@ -258,6 +307,11 @@ impl InstanceConfig {
         cfg.allow_registration = flag("allow_registration", cfg.allow_registration);
         cfg.allow_local_login = flag("allow_local_login", cfg.allow_local_login);
         cfg.allow_oidc = flag("allow_oidc", cfg.allow_oidc);
+        cfg.scan_uploads = flag("scan_uploads", cfg.scan_uploads);
+        cfg.block_encrypted_archives = flag("block_encrypted_archives", cfg.block_encrypted_archives);
+        if !get("registration_mode").is_empty() {
+            cfg.registration_mode = get("registration_mode").to_string();
+        }
         cfg
     }
 
@@ -300,6 +354,10 @@ impl InstanceConfig {
         if self.default_expiry_secs > self.max_expiry_secs {
             return Err("default_expiry_secs <= max_expiry_secs violated".into());
         }
+        match self.registration_mode.as_str() {
+            "open" | "invite" | "closed" => {}
+            _ => return Err("registration_mode must be open|invite|closed".into()),
+        }
         Ok(())
     }
 
@@ -319,6 +377,9 @@ impl InstanceConfig {
             ("allow_local_login", self.allow_local_login.to_string()),
             ("allow_oidc", self.allow_oidc.to_string()),
             ("anonymous_max_bytes", self.anonymous_max_bytes.to_string()),
+            ("registration_mode", self.registration_mode.clone()),
+            ("scan_uploads", self.scan_uploads.to_string()),
+            ("block_encrypted_archives", self.block_encrypted_archives.to_string()),
         ]
     }
 }

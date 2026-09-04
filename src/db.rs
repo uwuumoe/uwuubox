@@ -46,6 +46,10 @@ pub struct User {
     pub avatar_key: Option<String>,
     pub password_hash: Option<String>,
     pub is_admin: bool,
+    pub role_id: Option<Uuid>,
+    pub quota_override_bytes: Option<i64>,
+    pub strip_exif_default: bool,
+    pub email: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -60,6 +64,9 @@ pub struct FileRow {
     pub sha256: Vec<u8>,
     pub storage_key: String,
     pub visibility: String,
+    pub burn_after_read: bool,
+    pub access_password_hash: Option<String>,
+    pub scan_status: String,
     pub expires_at: DateTime<Utc>,
     pub delete_token_hash: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -72,16 +79,20 @@ pub struct PasteRow {
     pub title: Option<String>,
     pub body: String,
     pub language: Option<String>,
+    pub format: String,
     pub visibility: String,
+    pub burn_after_read: bool,
+    pub access_password_hash: Option<String>,
     pub expires_at: DateTime<Utc>,
     pub delete_token_hash: Option<String>,
     pub created_at: DateTime<Utc>,
 }
-
 #[derive(Debug, Clone, FromRow)]
 pub struct TokenInfo {
     pub id: Uuid,
     pub label: String,
+    pub scopes: Vec<String>,
+    pub expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub last_used_at: Option<DateTime<Utc>>,
 }
@@ -192,7 +203,7 @@ pub async fn touch_token(pool: &PgPool, hash: &str) -> Result<(), sqlx::Error> {
 
 pub async fn list_tokens(pool: &PgPool, user_id: &Uuid) -> Result<Vec<TokenInfo>, sqlx::Error> {
     sqlx::query_as::<_, TokenInfo>(
-        "SELECT id, label, created_at, last_used_at FROM api_tokens
+        "SELECT id, label, scopes, expires_at, created_at, last_used_at FROM api_tokens
          WHERE user_id = $1 ORDER BY created_at DESC",
     )
     .bind(user_id)
@@ -344,4 +355,252 @@ pub async fn expired_pastes(pool: &PgPool, limit: i64) -> Result<Vec<PasteRow>, 
     .bind(limit)
     .fetch_all(pool)
     .await
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct Role {
+    pub id: Uuid,
+    pub name: String,
+    pub max_file_bytes: Option<i64>,
+    pub max_paste_bytes: Option<i64>,
+    pub max_avatar_bytes: Option<i64>,
+    pub min_expiry_secs: Option<i64>,
+    pub max_expiry_secs: Option<i64>,
+    pub default_expiry_secs: Option<i64>,
+    pub quota_bytes: Option<i64>,
+    pub can_publish_public: bool,
+    pub can_burn: bool,
+    pub can_comment: bool,
+    pub can_create_collections: bool,
+    pub can_moderate: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct Collection {
+    pub id: Uuid,
+    pub owner_id: Uuid,
+    pub title: String,
+    pub description: String,
+    pub visibility: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct CollectionItem {
+    pub collection_id: Uuid,
+    pub kind: String,
+    pub core: String,
+    pub position: i64,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct CommentRow {
+    pub id: i64,
+    pub target_kind: String,
+    pub target_core: String,
+    pub author_id: Option<Uuid>,
+    pub author_name: Option<String>,
+    pub body: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct InviteCode {
+    pub code: String,
+    pub created_by: Option<Uuid>,
+    pub max_uses: Option<i32>,
+    pub uses: i32,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct AuditEntry {
+    pub id: i64,
+    pub actor_id: Option<Uuid>,
+    pub actor_name: Option<String>,
+    pub action: String,
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+    pub detail: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Resolved per-request caps for a user (role overrides, NULL falls back to
+/// instance defaults). Anonymous callers pass `None` for the user.
+#[derive(Debug, Clone)]
+pub struct EffectiveLimits {
+    pub max_file_bytes: i64,
+    pub max_paste_bytes: i64,
+    pub max_avatar_bytes: i64,
+    pub min_expiry_secs: i64,
+    pub max_expiry_secs: i64,
+    pub default_expiry_secs: i64,
+    pub quota_bytes: Option<i64>,
+    pub can_publish_public: bool,
+    pub can_burn: bool,
+    pub can_comment: bool,
+    pub can_create_collections: bool,
+    pub can_moderate: bool,
+}
+
+pub async fn find_role(pool: &PgPool, id: &Uuid) -> Result<Option<Role>, sqlx::Error> {
+    sqlx::query_as::<_, Role>("SELECT * FROM roles WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+}
+
+pub async fn effective_limits(
+    pool: &PgPool,
+    cfg: &InstanceConfig,
+    user: Option<&User>,
+) -> Result<EffectiveLimits, sqlx::Error> {
+    let role = match user.and_then(|u| u.role_id.as_ref()) {
+        Some(id) => find_role(pool, id).await?,
+        None => None,
+    };
+    let pick = |r: Option<i64>, d: i64| r.unwrap_or(d);
+    Ok(EffectiveLimits {
+        max_file_bytes: pick(role.as_ref().and_then(|r| r.max_file_bytes), cfg.max_file_bytes),
+        max_paste_bytes: pick(role.as_ref().and_then(|r| r.max_paste_bytes), cfg.max_paste_bytes),
+        max_avatar_bytes: pick(
+            role.as_ref().and_then(|r| r.max_avatar_bytes),
+            cfg.max_avatar_bytes,
+        ),
+        min_expiry_secs: pick(
+            role.as_ref().and_then(|r| r.min_expiry_secs),
+            cfg.min_expiry_secs,
+        ),
+        max_expiry_secs: pick(
+            role.as_ref().and_then(|r| r.max_expiry_secs),
+            cfg.max_expiry_secs,
+        ),
+        default_expiry_secs: pick(
+            role.as_ref().and_then(|r| r.default_expiry_secs),
+            cfg.default_expiry_secs,
+        ),
+        quota_bytes: user
+            .and_then(|u| u.quota_override_bytes)
+            .or_else(|| role.as_ref().and_then(|r| r.quota_bytes)),
+        can_publish_public: role.as_ref().map(|r| r.can_publish_public).unwrap_or(true),
+        can_burn: role.as_ref().map(|r| r.can_burn).unwrap_or(true),
+        can_comment: role.as_ref().map(|r| r.can_comment).unwrap_or(true),
+        can_create_collections: role
+            .as_ref()
+            .map(|r| r.can_create_collections)
+            .unwrap_or(true),
+        can_moderate: role.as_ref().map(|r| r.can_moderate).unwrap_or(false),
+    })
+}
+
+/// Logical bytes owned by a user (deduped files count once per link).
+pub async fn storage_used(pool: &PgPool, user_id: &Uuid) -> Result<i64, sqlx::Error> {
+    let files: Option<i64> =
+        sqlx::query_scalar("SELECT COALESCE(SUM(size_bytes), 0) FROM files WHERE owner_id = $1")
+            .bind(user_id)
+            .fetch_one(pool)
+            .await?;
+    Ok(files.unwrap_or(0))
+}
+
+pub async fn audit(
+    pool: &PgPool,
+    actor: Option<&Uuid>,
+    action: &str,
+    target_type: Option<&str>,
+    target_id: Option<&str>,
+    detail: Option<serde_json::Value>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO admin_audit_log (actor_id, action, target_type, target_id, detail)
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(actor)
+    .bind(action)
+    .bind(target_type)
+    .bind(target_id)
+    .bind(detail)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Dedupe bookkeeping. Returns `(storage_key, is_new)`: when `is_new` the
+/// caller must PUT the bytes, otherwise another row already owns an object
+/// with this hash. Serialized by the `objects` PK: exactly one caller wins.
+pub async fn acquire_object(
+    pool: &PgPool,
+    sha256: &[u8],
+    candidate_key: &str,
+    size_bytes: i64,
+    mime_stored: &str,
+) -> Result<(String, bool), sqlx::Error> {
+    if let Some(row) = sqlx::query_as::<_, (String,)>(
+        "INSERT INTO objects (sha256, storage_key, size_bytes, mime_stored)
+         VALUES ($1, $2, $3, $4) ON CONFLICT (sha256) DO NOTHING RETURNING storage_key",
+    )
+    .bind(sha256)
+    .bind(candidate_key)
+    .bind(size_bytes)
+    .bind(mime_stored)
+    .fetch_optional(pool)
+    .await?
+    {
+        return Ok((row.0, true));
+    }
+    let key: String = sqlx::query_scalar(
+        "UPDATE objects SET refcount = refcount + 1 WHERE sha256 = $1 RETURNING storage_key",
+    )
+    .bind(sha256)
+    .fetch_one(pool)
+    .await?;
+    Ok((key, false))
+}
+
+/// Drop one reference to an object. Returns true when the caller must now
+/// delete the backing bytes (refcount hit zero and the row was removed).
+pub async fn release_object(pool: &PgPool, storage_key: &str) -> Result<bool, sqlx::Error> {
+    let left: Option<i32> = sqlx::query_scalar(
+        "UPDATE objects SET refcount = refcount - 1 WHERE storage_key = $1 RETURNING refcount",
+    )
+    .bind(storage_key)
+    .fetch_optional(pool)
+    .await?;
+    match left {
+        Some(n) if n <= 0 => {
+            sqlx::query("DELETE FROM objects WHERE storage_key = $1")
+                .bind(storage_key)
+                .execute(pool)
+                .await?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+/// Newest-first global public feed for the explore page.
+pub async fn public_feed(
+    pool: &PgPool,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<FileRow>, Vec<PasteRow>), sqlx::Error> {
+    let files = sqlx::query_as::<_, FileRow>(
+        "SELECT * FROM files WHERE visibility = 'public' AND expires_at > now()
+         ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+    )
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+    let pastes = sqlx::query_as::<_, PasteRow>(
+        "SELECT * FROM pastes WHERE visibility = 'public' AND expires_at > now()
+         ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+    )
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+    Ok((files, pastes))
 }

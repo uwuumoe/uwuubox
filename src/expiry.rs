@@ -6,7 +6,11 @@ use sqlx::PgPool;
 
 use crate::{db, storage::Store};
 
-pub async fn run_once(pool: &PgPool, store: &Store) -> (usize, usize) {
+pub async fn run_once(
+    pool: &PgPool,
+    store: &Store,
+    metrics: &std::sync::Arc<crate::metrics::Metrics>,
+) -> (usize, usize) {
     let mut files = 0usize;
     let mut pastes = 0usize;
 
@@ -52,18 +56,20 @@ pub async fn run_once(pool: &PgPool, store: &Store) -> (usize, usize) {
         }
         Err(e) => tracing::error!(error = %e, "expiry: paste scan failed"),
     }
-
     if files + pastes > 0 {
         tracing::info!(files, pastes, "expiry sweep removed expired items");
     }
+    metrics.sweeper_runs.inc();
+    metrics.files_swept.inc_by(files as u64);
+    metrics.pastes_swept.inc_by(pastes as u64);
     (files, pastes)
 }
 
-pub fn spawn(pool: PgPool, store: Store) {
+pub fn spawn(pool: PgPool, store: Store, metrics: std::sync::Arc<crate::metrics::Metrics>) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-            run_once(&pool, &store).await;
+            run_once(&pool, &store, &metrics).await;
         }
     });
 }
