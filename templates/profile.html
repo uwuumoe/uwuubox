@@ -1,0 +1,43 @@
+{% extends "layout.html" %}
+{% block title %}{{ profile.username }} · {{ instance_name }}{% endblock %}
+{% block head %}
+<meta property="og:title" content="{{ profile.username }} on {{ instance_name }}">
+{% match profile.bio %}
+{% when Some with (b) %}<meta property="og:description" content="{{ b }}">
+{% when None %}<meta property="og:description" content="public uploads by {{ profile.username }}">
+{% endmatch %}
+{% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
+<meta name="twitter:card" content="summary">
+{% endblock %}
+{% block content %}
+<div class="profile-head">
+{% match avatar_url %}
+{% when Some with (a) %}<img class="avatar" src="{{ a }}" alt="" width="72" height="72">
+{% when None %}{% endmatch %}
+<div>
+<h1>{{ profile.username }}</h1>
+{% match profile.display_name %}
+{% when Some with (d) %}<p class="display">{{ d }}</p>
+{% when None %}{% endmatch %}
+{% match profile.bio %}
+{% when Some with (b) %}<p class="bio">{{ b }}</p>
+{% when None %}{% endmatch %}
+</div>
+</div>
+<h2>files</h2>
+{% if files.is_empty() %}<p class="hint">nothing public yet.</p>{% endif %}
+<ul class="items">
+{% for f in files %}
+<li><a href="/f/{{ f.id_core }}{{ f.ext }}">{{ f.original_name }}</a> <span class="dim">{{ f.size_bytes }} B · {{ f.mime_stored }}</span></li>
+{% endfor %}
+</ul>
+<h2>pastes</h2>
+{% if pastes.is_empty() %}<p class="hint">nothing public yet.</p>{% endif %}
+<ul class="items">
+{% for p in pastes %}
+<li><a href="/p/{{ p.id_core }}">{% match p.title %}{% when Some with (t) %}{{ t }}{% when None %}paste {{ p.id_core }}{% endmatch %}</a></li>
+{% endfor %}
+</ul>
+{% if page > 1 %}<a href="/u/{{ profile.username }}?page={{ page - 1 }}">← newer</a>{% endif %}
+{% if has_next %}<a href="/u/{{ profile.username }}?page={{ page + 1 }}">older →</a>{% endif %}
+{% endblock %}

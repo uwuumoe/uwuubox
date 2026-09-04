@@ -1,0 +1,47 @@
+{% extends "layout.html" %}
+{% block title %}admin · {{ instance_name }}{% endblock %}
+{% block content %}
+<h1>instance config</h1>
+<form method="post" action="/admin/config">
+<fieldset><legend>branding</legend>
+<label class="field">instance_name (≤48)
+<input type="text" name="instance_name" maxlength="48" value="{{ cfg.instance_name }}" required>
+</label>
+<label class="field">tagline (≤140)
+<input type="text" name="tagline" maxlength="140" value="{{ cfg.tagline }}">
+</label>
+<label class="field">icon_url (https:// or /path, ≤512)
+<input type="text" name="icon_url" maxlength="512" value="{{ cfg.icon_url }}">
+</label>
+</fieldset>
+<fieldset><legend>limits (bytes / seconds)</legend>
+<label class="field">max_file_bytes<input type="number" name="max_file_bytes" min="1" value="{{ cfg.max_file_bytes }}" required></label>
+<label class="field">anonymous_max_bytes (≤ max_file_bytes)<input type="number" name="anonymous_max_bytes" min="1" value="{{ cfg.anonymous_max_bytes }}" required></label>
+<label class="field">max_paste_bytes<input type="number" name="max_paste_bytes" min="1" value="{{ cfg.max_paste_bytes }}" required></label>
+<label class="field">max_avatar_bytes<input type="number" name="max_avatar_bytes" min="1" value="{{ cfg.max_avatar_bytes }}" required></label>
+<label class="field">min_expiry_secs<input type="number" name="min_expiry_secs" min="1" value="{{ cfg.min_expiry_secs }}" required></label>
+<label class="field">default_expiry_secs<input type="number" name="default_expiry_secs" min="1" value="{{ cfg.default_expiry_secs }}" required></label>
+<label class="field">max_expiry_secs<input type="number" name="max_expiry_secs" min="1" value="{{ cfg.max_expiry_secs }}" required></label>
+</fieldset>
+<fieldset><legend>toggles</legend>
+<label class="field inline"><input type="checkbox" name="allow_anonymous" value="true" {% if cfg.allow_anonymous %}checked{% endif %}> allow_anonymous</label>
+<label class="field inline"><input type="checkbox" name="allow_registration" value="true" {% if cfg.allow_registration %}checked{% endif %}> allow_registration</label>
+<label class="field inline"><input type="checkbox" name="allow_local_login" value="true" {% if cfg.allow_local_login %}checked{% endif %}> allow_local_login</label>
+<label class="field inline"><input type="checkbox" name="allow_oidc" value="true" {% if cfg.allow_oidc %}checked{% endif %}> allow_oidc</label>
+</fieldset>
+<button type="submit">save</button>
+</form>
+<h1>users</h1>
+<ul class="items">
+{% for u in users %}
+<li><a href="/u/{{ u.username }}">{{ u.username }}</a>
+<span class="dim">{% if u.is_admin %}admin · {% endif %}{{ u.created_at }}</span>
+{% if u.is_admin %}
+<form method="post" action="/admin/users/{{ u.id }}/grant"><input type="hidden" name="action" value="revoke"><button type="submit">revoke admin</button></form>
+{% else %}
+<form method="post" action="/admin/users/{{ u.id }}/grant"><input type="hidden" name="action" value="grant"><button type="submit">make admin</button></form>
+{% endif %}
+</li>
+{% endfor %}
+</ul>
+{% endblock %}

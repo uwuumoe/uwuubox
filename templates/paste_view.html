@@ -1,0 +1,28 @@
+{% extends "layout.html" %}
+{% block title %}{{ title }} · {{ instance_name }}{% endblock %}
+{% block head %}
+<meta property="og:title" content="{{ title }}">
+<meta property="og:description" content="{{ desc }}">
+<meta property="og:type" content="website">
+{% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
+<meta name="twitter:card" content="summary">
+<style>{{ highlight_css|safe }}
+.hl{counter-reset:line}
+.hl .line{counter-increment:line;display:block;min-height:1.2em}
+.hl .line::before{content:counter(line);display:inline-block;width:2.5em;margin-right:1em;text-align:right;opacity:.45;user-select:none}
+.hl pre{margin:0}
+</style>
+{% endblock %}
+{% block content %}
+<h1 class="filename">{{ title }}</h1>
+<ul class="meta">
+<li>{{ language }}</li>
+<li>expires {{ expires_human }}</li>
+{% match owner_name %}
+{% when Some with (n) %}<li>by <a href="/u/{{ n }}">{{ n }}</a></li>
+{% when None %}<li>anonymous paste</li>
+{% endmatch %}
+</ul>
+<div class="hl"><pre><code>{{ highlighted|safe }}</code></pre></div>
+<p><a class="button ghost" href="{{ raw_url }}">raw plaintext</a></p>
+{% endblock %}

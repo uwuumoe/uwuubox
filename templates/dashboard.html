@@ -1,0 +1,100 @@
+{% extends "layout.html" %}
+{% block title %}your uploads · {{ instance_name }}{% endblock %}
+{% block content %}
+{% match user %}
+{% when Some with (u) %}
+<h1>hi, {{ u.username }}</h1>
+{% match just_created_token %}
+{% when Some with (t) %}
+<p class="notice">new API token (shown once — treat it like a password):<br><code class="token">{{ t }}</code></p>
+{% when None %}{% endmatch %}
+<div class="dash-grid">
+<section>
+<h2>your files</h2>
+{% if files.is_empty() %}<p class="hint">nothing uploaded yet.</p>{% endif %}
+<ul class="items">
+{% for f in files %}
+<li>
+<a href="/f/{{ f.id_core }}{{ f.ext }}">{{ f.original_name }}</a>
+<span class="dim">{{ f.size_bytes }} B · {{ f.visibility }} · {{ f.created_at }}</span>
+<form method="post" action="/account/files/{{ f.id_core }}/visibility">
+<select name="visibility">
+<option value="unlisted" {% if f.visibility == "unlisted" %}selected{% endif %}>unlisted</option>
+<option value="public" {% if f.visibility == "public" %}selected{% endif %}>public</option>
+</select>
+<button type="submit">set</button>
+</form>
+<form method="post" action="/account/files/{{ f.id_core }}/delete"><button type="submit">delete</button></form>
+</li>
+{% endfor %}
+</ul>
+<h2>your pastes</h2>
+{% if pastes.is_empty() %}<p class="hint">no pastes yet.</p>{% endif %}
+<ul class="items">
+{% for p in pastes %}
+<li>
+<a href="/p/{{ p.id_core }}">{% match p.title %}{% when Some with (t) %}{{ t }}{% when None %}paste {{ p.id_core }}{% endmatch %}</a>
+<span class="dim">{{ p.visibility }} · {{ p.created_at }}</span>
+<form method="post" action="/account/pastes/{{ p.id_core }}/visibility">
+<select name="visibility">
+<option value="unlisted" {% if p.visibility == "unlisted" %}selected{% endif %}>unlisted</option>
+<option value="public" {% if p.visibility == "public" %}selected{% endif %}>public</option>
+</select>
+<button type="submit">set</button>
+</form>
+<form method="post" action="/account/pastes/{{ p.id_core }}/delete"><button type="submit">delete</button></form>
+</li>
+{% endfor %}
+</ul>
+</section>
+<section>
+<h2>profile</h2>
+{% match avatar_url %}
+{% when Some with (a) %}<img class="avatar" src="{{ a }}" alt="your avatar" width="72" height="72">
+{% when None %}{% endmatch %}
+<form method="post" action="/account/profile">
+<label class="field">display name
+{% match u.display_name %}
+{% when Some with (d) %}<input type="text" name="display_name" maxlength="64" value="{{ d }}">
+{% when None %}<input type="text" name="display_name" maxlength="64">
+{% endmatch %}
+</label>
+<label class="field">bio
+{% match u.bio %}
+{% when Some with (b) %}<textarea name="bio" rows="3" maxlength="500">{{ b }}</textarea>
+{% when None %}<textarea name="bio" rows="3" maxlength="500"></textarea>
+{% endmatch %}
+</label>
+<button type="submit">save</button>
+</form>
+<form method="post" action="/account/avatar" enctype="multipart/form-data">
+<label class="field">avatar (square-ish image, ≤2 MB)
+<input type="file" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp,image/avif" required>
+</label>
+<button type="submit">upload avatar</button>
+</form>
+<h2>API tokens</h2>
+<ul class="items">
+{% for t in tokens %}
+<li><code>{{ t.id }}</code> <span class="dim">{{ t.label }} · created {{ t.created_at }} · last used {% match t.last_used_at %}{% when Some with (u) %}{{ u }}{% when None %}never{% endmatch %}</span>
+<form method="post" action="/account/tokens/{{ t.id }}/revoke"><button type="submit">revoke</button></form>
+</li>
+{% endfor %}
+</ul>
+<form method="post" action="/account/tokens">
+<label class="field">new token label
+<input type="text" name="label" maxlength="64" placeholder="sharex on laptop">
+</label>
+<button type="submit">create token</button>
+</form>
+<h2>login</h2>
+{% if oidc_linked %}
+<p class="hint">an OIDC identity is linked to this account.</p>
+{% else if oidc_enabled %}
+<form method="post" action="/account/oidc/link"><button type="submit">link OIDC identity</button></form>
+{% endif %}
+<p class="hint">share endpoint: <code>{{ base_url }}/api/upload</code> with <code>Authorization: Bearer uwu_…</code></p>
+</section>
+</div>
+{% when None %}{% endmatch %}
+{% endblock %}

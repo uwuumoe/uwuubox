@@ -1,0 +1,25 @@
+{% extends "layout.html" %}
+{% block title %}{{ mode }} · {{ instance_name }}{% endblock %}
+{% block content %}
+{% if mode == "register" %}<h1>register</h1>{% else %}<h1>log in</h1>{% endif %}
+{% match error %}
+{% when Some with (e) %}<p class="notice">{{ e }}</p>
+{% when None %}{% endmatch %}
+<form method="post" action="/{{ mode }}">
+<label class="field">username
+<input type="text" name="username" autocomplete="username" minlength="3" maxlength="24" required>
+</label>
+<label class="field">password
+<input type="password" name="password" autocomplete="{% if mode == "register" %}new-password{% else %}current-password{% endif %}" minlength="8" required>
+</label>
+<button type="submit">{% if mode == "register" %}create account{% else %}log in{% endif %}</button>
+</form>
+{% if oidc_enabled %}
+<p><a class="button ghost" href="/oidc/login">continue with single sign-on</a></p>
+{% endif %}
+{% if mode == "login" %}
+{% if allow_registration %}<p class="hint">no account? <a href="/register">register</a></p>{% endif %}
+{% else %}
+<p class="hint">already have one? <a href="/login">log in</a></p>
+{% endif %}
+{% endblock %}

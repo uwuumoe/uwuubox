@@ -1,0 +1,44 @@
+{% extends "layout.html" %}
+{% block title %}{{ file.original_name }} · {{ instance_name }}{% endblock %}
+{% block head %}
+<meta property="og:title" content="{{ file.original_name }}">
+<meta property="og:description" content="{{ size_human }} · expires {{ expires_human }} · {{ instance_name }}">
+<meta property="og:type" content="website">
+<meta property="og:url" content="{{ preview_url }}">
+{% if kind == "image" %}
+<meta property="og:image" content="{{ raw_url }}">
+<meta name="twitter:card" content="summary_large_image">
+{% else %}
+{% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
+<meta name="twitter:card" content="summary">
+{% endif %}
+{% endblock %}
+{% block content %}
+<h1 class="filename">{{ file.original_name }}</h1>
+<ul class="meta">
+<li>{{ size_human }} · {{ file.mime_stored }}</li>
+<li>expires {{ expires_human }}</li>
+<li>sha256 <code>{{ sha256_hex }}</code></li>
+{% match owner_name %}
+{% when Some with (n) %}<li>by <a href="/u/{{ n }}">{{ n }}</a></li>
+{% when None %}<li>anonymous upload</li>
+{% endmatch %}
+</ul>
+{% if is_owner %}<p class="hint">you own this file — <a href="/account">manage it</a>.</p>{% endif %}
+<div class="preview">
+{% if kind == "image" %}
+<img src="{{ raw_url }}" alt="{{ file.original_name }}">
+{% else if kind == "video" %}
+<video controls preload="metadata" src="{{ raw_url }}"></video>
+{% else if kind == "audio" %}
+<audio controls preload="metadata" src="{{ raw_url }}"></audio>
+{% else if kind == "text" %}
+{% match text_snippet %}
+{% when Some with (t) %}<pre class="text">{{ t }}</pre>
+{% when None %}<p class="hint">text preview unavailable — download to view.</p>
+{% endmatch %}
+{% endif %}
+</div>
+<p><a class="button" href="{{ raw_url }}" download>download</a>
+<a class="button ghost" href="{{ raw_url }}">raw link</a></p>
+{% endblock %}
