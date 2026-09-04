@@ -1,0 +1,37 @@
+{% extends "layout.html" %}
+{% block title %}register · {{ instance_name }}{% endblock %}
+{% block content %}
+<h1>register</h1>
+{% match error %}{% when Some with (e) %}<p class="error">{{ e }}</p>{% when None %}{% endmatch %}
+<form method="post" action="/register">
+<label class="field">username
+<input type="text" name="username" minlength="3" maxlength="24" autocomplete="username" required>
+</label>
+<label class="field">email (optional)
+<input type="email" name="email" maxlength="320" autocomplete="email">
+</label>
+<label class="field">password
+<input type="password" name="password" minlength="8" autocomplete="new-password" required>
+</label>
+{% if invite_required %}
+<label class="field">invite code
+<input type="text" name="invite" autocomplete="off" required>
+</label>
+{% endif %}
+<button type="submit">create account</button>
+</form>
+{% if oidc_enabled %}
+{% if invite_required %}
+<h2>single sign-on</h2>
+<form method="get" action="/oidc/login">
+<label class="field">invite code
+<input type="text" name="invite" autocomplete="off" required>
+</label>
+<button type="submit">continue with single sign-on</button>
+</form>
+{% else %}
+<p><a class="button ghost" href="/oidc/login">continue with single sign-on</a></p>
+{% endif %}
+{% endif %}
+<p class="hint">already have one? <a href="/login">log in</a></p>
+{% endblock %}
