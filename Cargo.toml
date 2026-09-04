@@ -45,7 +45,7 @@ zip = { version = "2" }
 pulldown-cmark = { version = "0.12" }
 ammonia = { version = "4" }
 lettre = { version = "0.11", default-features = false, features = ["builder", "tokio1", "tokio1-rustls", "smtp-transport", "rustls-tls"] }
-webauthn-rs = { version = "0.5" }
+webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation"] }
 prometheus = { version = "0.13" }
 tracing-opentelemetry = { version = "0.29" }
 opentelemetry = { version = "0.28" }

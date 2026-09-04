@@ -29,6 +29,8 @@ pub enum AppError {
     Unprocessable(String),
     #[error("rate limited")]
     RateLimited,
+    #[error("{0}")]
+    ServiceUnavailable(String),
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -61,6 +63,7 @@ impl AppError {
             Self::UnsupportedMedia { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::Unprocessable(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
+            Self::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -75,6 +78,7 @@ impl AppError {
             Self::UnsupportedMedia { .. } => "unsupported_media_type",
             Self::Unprocessable(_) => "unprocessable",
             Self::RateLimited => "rate_limited",
+            Self::ServiceUnavailable(_) => "unavailable",
             Self::Internal(_) => "internal_error",
         }
     }
@@ -122,6 +126,7 @@ impl IntoResponse for AppError {
                 ("unsupported media", format!("refusing to serve {mime}"))
             }
             Self::RateLimited => ("too many requests", "slow down and retry later".into()),
+            Self::ServiceUnavailable(m) => ("unavailable", m.clone()),
             Self::Unprocessable(m) => ("rejected", m.clone()),
             Self::Internal(m) => ("internal error", m.clone()),
         };
@@ -133,7 +138,10 @@ impl IntoResponse for JsonError {
     fn into_response(self) -> Response {
         let status = self.0.status();
         let body = match &self.0 {
-            AppError::BadRequest(m) | AppError::Forbidden(m) | AppError::Internal(m) => {
+            AppError::BadRequest(m)
+            | AppError::Forbidden(m)
+            | AppError::ServiceUnavailable(m)
+            | AppError::Internal(m) => {
                 json!({"error": self.0.code(), "message": m})
             }
             AppError::Unauthorized => json!({"error": "unauthorized"}),

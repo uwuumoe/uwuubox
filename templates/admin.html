@@ -23,24 +23,114 @@
 <label class="field">default_expiry_secs<input type="number" name="default_expiry_secs" min="1" value="{{ cfg.default_expiry_secs }}" required></label>
 <label class="field">max_expiry_secs<input type="number" name="max_expiry_secs" min="1" value="{{ cfg.max_expiry_secs }}" required></label>
 </fieldset>
-<fieldset><legend>toggles</legend>
+<fieldset><legend>access</legend>
+<label class="field">registration mode
+<select name="registration_mode" required>
+<option value="open" {% if cfg.registration_mode == "open" %}selected{% endif %}>open</option>
+<option value="invite" {% if cfg.registration_mode == "invite" %}selected{% endif %}>invite only</option>
+<option value="closed" {% if cfg.registration_mode == "closed" %}selected{% endif %}>closed</option>
+</select>
+</label>
 <label class="field inline"><input type="checkbox" name="allow_anonymous" value="true" {% if cfg.allow_anonymous %}checked{% endif %}> allow_anonymous</label>
-<label class="field inline"><input type="checkbox" name="allow_registration" value="true" {% if cfg.allow_registration %}checked{% endif %}> allow_registration</label>
 <label class="field inline"><input type="checkbox" name="allow_local_login" value="true" {% if cfg.allow_local_login %}checked{% endif %}> allow_local_login</label>
 <label class="field inline"><input type="checkbox" name="allow_oidc" value="true" {% if cfg.allow_oidc %}checked{% endif %}> allow_oidc</label>
+<label class="field inline"><input type="checkbox" name="scan_uploads" value="true" {% if cfg.scan_uploads %}checked{% endif %}> scan_uploads</label>
+<label class="field inline"><input type="checkbox" name="block_encrypted_archives" value="true" {% if cfg.block_encrypted_archives %}checked{% endif %}> block_encrypted_archives</label>
 </fieldset>
-<button type="submit">save</button>
+<button type="submit">save config</button>
 </form>
+
+<h1>roles</h1>
+<form method="post" action="/admin/roles">
+<fieldset><legend>create role</legend>
+<label class="field">name<input type="text" name="name" minlength="3" maxlength="32" pattern="[a-z0-9_-]+" required></label>
+<label class="field">max file bytes<input type="number" name="max_file_bytes"></label>
+<label class="field">max paste bytes<input type="number" name="max_paste_bytes"></label>
+<label class="field">max avatar bytes<input type="number" name="max_avatar_bytes"></label>
+<label class="field">minimum expiry seconds<input type="number" name="min_expiry_secs"></label>
+<label class="field">default expiry seconds<input type="number" name="default_expiry_secs"></label>
+<label class="field">maximum expiry seconds<input type="number" name="max_expiry_secs"></label>
+<label class="field">quota bytes<input type="number" name="quota_bytes" min="0"></label>
+<label class="field inline"><input type="checkbox" name="can_publish_public" checked> publish public</label>
+<label class="field inline"><input type="checkbox" name="can_burn" checked> burn after read</label>
+<label class="field inline"><input type="checkbox" name="can_comment" checked> comment</label>
+<label class="field inline"><input type="checkbox" name="can_create_collections" checked> create collections</label>
+<label class="field inline"><input type="checkbox" name="can_moderate"> moderate</label>
+<button type="submit">create role</button>
+</fieldset>
+</form>
+
+{% for r in roles %}
+<section>
+<h2>{{ r.role.name }}</h2>
+<form method="post" action="/admin/roles/{{ r.role.id }}">
+<label class="field">name<input type="text" name="name" minlength="3" maxlength="32" pattern="[a-z0-9_-]+" value="{{ r.role.name }}" required></label>
+<label class="field">max file bytes{% match r.role.max_file_bytes %}{% when Some with (v) %}<input type="number" name="max_file_bytes" value="{{ v }}">{% when None %}<input type="number" name="max_file_bytes">{% endmatch %}</label>
+<label class="field">max paste bytes{% match r.role.max_paste_bytes %}{% when Some with (v) %}<input type="number" name="max_paste_bytes" value="{{ v }}">{% when None %}<input type="number" name="max_paste_bytes">{% endmatch %}</label>
+<label class="field">max avatar bytes{% match r.role.max_avatar_bytes %}{% when Some with (v) %}<input type="number" name="max_avatar_bytes" value="{{ v }}">{% when None %}<input type="number" name="max_avatar_bytes">{% endmatch %}</label>
+<label class="field">minimum expiry seconds{% match r.role.min_expiry_secs %}{% when Some with (v) %}<input type="number" name="min_expiry_secs" value="{{ v }}">{% when None %}<input type="number" name="min_expiry_secs">{% endmatch %}</label>
+<label class="field">default expiry seconds{% match r.role.default_expiry_secs %}{% when Some with (v) %}<input type="number" name="default_expiry_secs" value="{{ v }}">{% when None %}<input type="number" name="default_expiry_secs">{% endmatch %}</label>
+<label class="field">maximum expiry seconds{% match r.role.max_expiry_secs %}{% when Some with (v) %}<input type="number" name="max_expiry_secs" value="{{ v }}">{% when None %}<input type="number" name="max_expiry_secs">{% endmatch %}</label>
+<label class="field">quota bytes{% match r.role.quota_bytes %}{% when Some with (v) %}<input type="number" name="quota_bytes" min="0" value="{{ v }}">{% when None %}<input type="number" name="quota_bytes" min="0">{% endmatch %}</label>
+<label class="field inline"><input type="checkbox" name="can_publish_public" {% if r.role.can_publish_public %}checked{% endif %}> publish public</label>
+<label class="field inline"><input type="checkbox" name="can_burn" {% if r.role.can_burn %}checked{% endif %}> burn after read</label>
+<label class="field inline"><input type="checkbox" name="can_comment" {% if r.role.can_comment %}checked{% endif %}> comment</label>
+<label class="field inline"><input type="checkbox" name="can_create_collections" {% if r.role.can_create_collections %}checked{% endif %}> create collections</label>
+<label class="field inline"><input type="checkbox" name="can_moderate" {% if r.role.can_moderate %}checked{% endif %}> moderate</label>
+<button type="submit">save role</button>
+</form>
+<h3>OIDC group mappings</h3>
+<ul class="items">
+{% for m in r.mappings %}
+<li><code>{{ m.issuer }}</code> · <code>{{ m.group_name }}</code> · priority {{ m.priority }}
+<form method="post" action="/admin/roles/{{ r.role.id }}/oidc-groups/remove">
+<input type="hidden" name="issuer" value="{{ m.issuer }}">
+<input type="hidden" name="group_name" value="{{ m.group_name }}">
+<button type="submit">remove mapping</button>
+</form>
+</li>
+{% endfor %}
+</ul>
+<form method="post" action="/admin/roles/{{ r.role.id }}/oidc-groups">
+<label class="field">exact issuer<input type="url" name="issuer" required></label>
+<label class="field">group name<input type="text" name="group_name" required></label>
+<label class="field">priority<input type="number" name="priority" value="0" required></label>
+<button type="submit">add mapping</button>
+</form>
+{% if r.members.is_empty() %}<p class="hint">no assigned users.</p>{% else %}<p class="hint">deleting this role will unassign: {% for member in r.members %}{{ member }} {% endfor %}</p>{% endif %}
+<form method="post" action="/admin/roles/{{ r.role.id }}/delete" onsubmit="return confirm('Delete this role and unassign its listed users?')"><button type="submit">delete role</button></form>
+</section>
+{% endfor %}
+
 <h1>users</h1>
 <ul class="items">
 {% for u in users %}
-<li><a href="/u/{{ u.username }}">{{ u.username }}</a>
-<span class="dim">{% if u.is_admin %}admin · {% endif %}{{ u.created_at }}</span>
-{% if u.is_admin %}
-<form method="post" action="/admin/users/{{ u.id }}/grant"><input type="hidden" name="action" value="revoke"><button type="submit">revoke admin</button></form>
+<li><a href="/u/{{ u.user.username }}">{{ u.user.username }}</a>
+<span class="dim">{% if u.user.is_admin %}admin · {% endif %}{{ u.user.created_at }}</span>
+<form method="post" action="/admin/users/{{ u.user.id }}/role">
+<label>role <select name="role_id"><option value="">none</option>{% for r in u.roles %}<option value="{{ r.id }}" {% if r.selected %}selected{% endif %}>{{ r.name }}</option>{% endfor %}</select></label>
+<label>quota override bytes <input type="number" name="quota_override_bytes" min="0" value="{{ u.quota_override_value }}"></label>
+<button type="submit">save access</button>
+</form>
+{% if u.user.is_admin %}
+<form method="post" action="/admin/users/{{ u.user.id }}/grant"><input type="hidden" name="action" value="revoke"><button type="submit">revoke admin</button></form>
 {% else %}
-<form method="post" action="/admin/users/{{ u.id }}/grant"><input type="hidden" name="action" value="grant"><button type="submit">make admin</button></form>
+<form method="post" action="/admin/users/{{ u.user.id }}/grant"><input type="hidden" name="action" value="grant"><button type="submit">make admin</button></form>
 {% endif %}
+</li>
+{% endfor %}
+</ul>
+
+<h1>invite codes</h1>
+<form method="post" action="/admin/invites">
+<label class="field">maximum uses<input type="number" name="max_uses" min="1"></label>
+<label class="field">expires at (UTC)<input type="datetime-local" name="expires_at"></label>
+<button type="submit">create invite</button>
+</form>
+<ul class="items">
+{% for invite in invites %}
+<li><code>{{ invite.code }}</code> · {{ invite.uses }} uses{% match invite.max_uses %}{% when Some with (m) %} / {{ m }}{% when None %} / unlimited{% endmatch %} · expires {% match invite.expires_at %}{% when Some with (e) %}{{ e }}{% when None %}never{% endmatch %}
+<form method="post" action="/admin/invites/{{ invite.code }}/revoke"><button type="submit">revoke</button></form>
 </li>
 {% endfor %}
 </ul>

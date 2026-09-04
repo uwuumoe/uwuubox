@@ -3,10 +3,12 @@
 
 use askama::Template;
 use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 use crate::{
     config::InstanceConfig,
-    db::{FileRow, PasteRow, TokenInfo, User},
+    db::{FileRow, InviteCode, PasteRow, Role, TokenInfo, User},
+    routes::{passkeys::PasskeyInfo, roles::RoleOidcGroup},
 };
 
 pub fn human_bytes(n: i64) -> String {
@@ -151,11 +153,39 @@ pub struct DashboardPage {
     pub files: Vec<FileRow>,
     pub pastes: Vec<PasteRow>,
     pub tokens: Vec<TokenInfo>,
+    pub passkeys: Vec<PasskeyInfo>,
     pub just_created_token: Option<String>,
+    pub profile_error: Option<String>,
+    pub now: DateTime<Utc>,
     pub oidc_enabled: bool,
     pub oidc_linked: bool,
+    pub webauthn_enabled: bool,
     pub avatar_url: Option<String>,
     pub base_url: String,
+    pub storage_used: i64,
+    pub storage_used_human: String,
+    pub quota_bytes: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AdminRoleOption {
+    pub id: Uuid,
+    pub name: String,
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct AdminUserRow {
+    pub user: User,
+    pub roles: Vec<AdminRoleOption>,
+    pub quota_override_value: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AdminRoleRow {
+    pub role: Role,
+    pub mappings: Vec<RoleOidcGroup>,
+    pub members: Vec<String>,
 }
 
 #[derive(Template)]
@@ -166,7 +196,9 @@ pub struct AdminPage {
     pub icon_url: String,
     pub user: Option<User>,
     pub cfg: InstanceConfig,
-    pub users: Vec<User>,
+    pub users: Vec<AdminUserRow>,
+    pub roles: Vec<AdminRoleRow>,
+    pub invites: Vec<InviteCode>,
 }
 
 #[derive(Template)]
@@ -191,13 +223,34 @@ pub fn login_page(cfg: &InstanceConfig, error: Option<String>) -> LoginPage {
         user: None,
         mode: "login",
         error,
-        allow_registration: cfg.allow_registration,
+        // Legacy allow_registration is deliberately ignored; registration_mode
+        // is the source of truth. The field name remains a login-template concern.
+        allow_registration: cfg.registration_mode != "closed",
         oidc_enabled: cfg.allow_oidc,
     }
 }
 
-pub fn register_page(cfg: &InstanceConfig, error: Option<String>) -> LoginPage {
-    let mut p = login_page(cfg, error);
-    p.mode = "register";
-    p
+#[derive(Template)]
+#[template(path = "register.html")]
+pub struct RegisterPage {
+    pub instance_name: String,
+    pub tagline: String,
+    pub icon_url: String,
+    pub user: Option<User>,
+    pub error: Option<String>,
+    pub invite_required: bool,
+    pub oidc_enabled: bool,
+}
+
+pub fn register_page(cfg: &InstanceConfig, error: Option<String>) -> RegisterPage {
+    let (instance_name, tagline, icon_url) = brand(cfg);
+    RegisterPage {
+        instance_name,
+        tagline,
+        icon_url,
+        user: None,
+        error,
+        invite_required: cfg.registration_mode == "invite",
+        oidc_enabled: cfg.allow_oidc,
+    }
 }

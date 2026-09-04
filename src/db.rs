@@ -217,14 +217,21 @@ pub async fn insert_token(
     user_id: &Uuid,
     hash: &str,
     label: &str,
+    scopes: &[String],
+    expires_at: Option<DateTime<Utc>>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO api_tokens (id, user_id, token_hash, label) VALUES ($1, $2, $3, $4)")
-        .bind(id)
-        .bind(user_id)
-        .bind(hash)
-        .bind(label)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO api_tokens (id, user_id, token_hash, label, scopes, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(id)
+    .bind(user_id)
+    .bind(hash)
+    .bind(label)
+    .bind(scopes)
+    .bind(expires_at)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -498,7 +505,7 @@ pub async fn effective_limits(
 /// Logical bytes owned by a user (deduped files count once per link).
 pub async fn storage_used(pool: &PgPool, user_id: &Uuid) -> Result<i64, sqlx::Error> {
     let files: Option<i64> =
-        sqlx::query_scalar("SELECT COALESCE(SUM(size_bytes), 0) FROM files WHERE owner_id = $1")
+        sqlx::query_scalar("SELECT COALESCE(SUM(size_bytes), 0)::bigint FROM files WHERE owner_id = $1")
             .bind(user_id)
             .fetch_one(pool)
             .await?;

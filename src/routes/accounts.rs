@@ -7,10 +7,12 @@ use axum::{
     response::{Html, IntoResponse, Json, Redirect, Response},
     Form,
 };
+use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use tower_sessions::Session;
 use uuid::Uuid;
+use validator::ValidateEmail;
 
 use crate::{
     auth::{self, SESSION_USER_ID},
@@ -21,6 +23,8 @@ use crate::{
     routes::{
         common::{avatar_url, wants_html},
         files::{remove_file, set_file_visibility},
+        invites::{self, InviteRegistrationError},
+        passkeys,
     },
     state::AppState,
     storage::avatar_key,
@@ -36,15 +40,17 @@ fn login_error_page(
     mode: &str,
     msg: impl Into<String>,
 ) -> Result<Response, AppError> {
-    let page = if mode == "register" {
-        views::register_page(cfg, Some(msg.into()))
-    } else {
-        views::login_page(cfg, Some(msg.into()))
-    };
     use askama::Template;
-    let body = page
-        .render()
-        .map_err(|e| AppError::internal(e.to_string()))?;
+    let error = Some(msg.into());
+    let body = if mode == "register" {
+        views::register_page(cfg, error)
+            .render()
+            .map_err(|e| AppError::internal(e.to_string()))?
+    } else {
+        views::login_page(cfg, error)
+            .render()
+            .map_err(|e| AppError::internal(e.to_string()))?
+    };
     Ok((StatusCode::BAD_REQUEST, Html(body)).into_response())
 }
 
@@ -53,10 +59,12 @@ fn login_error_page(
 pub async fn register_form(State(state): State<AppState>) -> Result<Response, AppError> {
     use askama::Template;
     let cfg = db::instance_config(&state.pool).await?;
-    if !cfg.allow_registration {
+    if cfg.registration_mode == "closed" {
         return Err(AppError::forbidden("registration is closed"));
     }
-    let body = views::register_page(&cfg, None)
+    let mut page = views::register_page(&cfg, None);
+    page.oidc_enabled = cfg.allow_oidc && state.oidc.is_some();
+    let body = page
         .render()
         .map_err(|e| AppError::internal(e.to_string()))?;
     Ok(Html(body).into_response())
@@ -65,7 +73,9 @@ pub async fn register_form(State(state): State<AppState>) -> Result<Response, Ap
 #[derive(Deserialize)]
 pub struct RegisterForm {
     pub username: String,
+    pub email: Option<String>,
     pub password: String,
+    pub invite: Option<String>,
 }
 
 pub async fn register_post(
@@ -74,10 +84,19 @@ pub async fn register_post(
     Form(f): Form<RegisterForm>,
 ) -> Result<Response, AppError> {
     let cfg = db::instance_config(&state.pool).await?;
-    if !cfg.allow_registration {
+    if cfg.registration_mode == "closed" {
         return Err(AppError::forbidden("registration is closed"));
     }
     let username = f.username.trim().to_string();
+    let email = f
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|email| !email.is_empty())
+        .map(str::to_lowercase);
+    if email.as_ref().is_some_and(|email| !email.validate_email()) {
+        return login_error_page(&cfg, "register", "enter a valid email address");
+    }
     if let Err(e) = auth::validate_username(&username) {
         return login_error_page(&cfg, "register", e);
     }
@@ -87,7 +106,38 @@ pub async fn register_post(
     };
     let id = auth::new_user_id();
     let is_admin = db::user_count(&state.pool).await? == 0;
-    match db::insert_user(&state.pool, &id, &username, Some(&hash), is_admin).await {
+    let user_result = match cfg.registration_mode.as_str() {
+        "open" => sqlx::query_as::<_, User>(
+            "INSERT INTO users (id, username, password_hash, email, is_admin)
+             VALUES ($1, $2, $3, $4, $5) RETURNING *",
+        )
+        .bind(id)
+        .bind(&username)
+        .bind(&hash)
+        .bind(email.as_deref())
+        .bind(is_admin)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(InviteRegistrationError::Database),
+        "invite" => {
+            let invite = f.invite.as_deref().map(str::trim).unwrap_or_default();
+            if invite.is_empty() {
+                return login_error_page(&cfg, "register", "invite code is required");
+            }
+            invites::create_user(
+                &state.pool,
+                &id,
+                &username,
+                Some(&hash),
+                email.as_deref(),
+                is_admin,
+                invite,
+            )
+            .await
+        }
+        _ => return Err(AppError::forbidden("registration is closed")),
+    };
+    match user_result {
         Ok(user) => {
             session
                 .insert(SESSION_USER_ID, user.id.to_string())
@@ -100,8 +150,17 @@ pub async fn register_post(
             tracing::info!(username = %username, admin = is_admin, "user registered");
             Ok(Redirect::to("/account").into_response())
         }
-        Err(e) if is_unique_violation(&e) => login_error_page(&cfg, "register", "username taken"),
-        Err(e) => Err(AppError::from(e)),
+        Err(InviteRegistrationError::Invalid) => login_error_page(
+            &cfg,
+            "register",
+            "invite code is invalid, expired, or fully used",
+        ),
+        Err(InviteRegistrationError::Database(e)) if is_unique_violation(&e) => login_error_page(
+            &cfg,
+            "register",
+            "username or email is already in use",
+        ),
+        Err(InviteRegistrationError::Database(e)) => Err(AppError::from(e)),
     }
 }
 
@@ -167,12 +226,19 @@ async fn dashboard_response(
     state: &AppState,
     user: &User,
     just_created_token: Option<String>,
+    profile_error: Option<String>,
 ) -> Result<Response, AppError> {
     use askama::Template;
     let (files, pastes) = db::own_items(&state.pool, &user.id).await?;
     let tokens = db::list_tokens(&state.pool, &user.id).await?;
+    let passkeys = passkeys::list_for_user(&state.pool, &user.id).await?;
     let cfg = db::instance_config(&state.pool).await?;
     let linked = db::oidc_linked(&state.pool, &user.id).await?;
+    let storage_used = db::storage_used(&state.pool, &user.id).await?;
+    let quota_bytes = db::effective_limits(&state.pool, &cfg, Some(user))
+        .await?
+        .quota_bytes;
+    let storage_used_human = views::human_bytes(storage_used);
     let page = DashboardPage {
         instance_name: cfg.instance_name,
         tagline: cfg.tagline,
@@ -181,16 +247,28 @@ async fn dashboard_response(
         files,
         pastes,
         tokens,
+        passkeys,
         just_created_token,
+        profile_error,
+        now: Utc::now(),
         oidc_enabled: cfg.allow_oidc && state.oidc.is_some(),
         oidc_linked: linked,
+        webauthn_enabled: state.webauthn.is_some(),
         avatar_url: avatar_url(user.avatar_key.as_deref()),
         base_url: state.env.base_url.clone(),
+        storage_used,
+        storage_used_human,
+        quota_bytes,
     };
     let body = page
         .render()
         .map_err(|e| AppError::internal(e.to_string()))?;
-    Ok(Html(body).into_response())
+    let status = if page.profile_error.is_some() {
+        StatusCode::BAD_REQUEST
+    } else {
+        StatusCode::OK
+    };
+    Ok((status, Html(body)).into_response())
 }
 
 pub async fn dashboard(
@@ -202,13 +280,14 @@ pub async fn dashboard(
     else {
         return Ok(Redirect::to("/login").into_response());
     };
-    dashboard_response(&state, &user, None).await
+    dashboard_response(&state, &user, None, None).await
 }
 
 #[derive(Deserialize)]
 pub struct ProfileForm {
     pub display_name: Option<String>,
     pub bio: Option<String>,
+    pub email: Option<String>,
 }
 
 pub async fn update_profile(
@@ -229,13 +308,49 @@ pub async fn update_profile(
         .bio
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let email = f
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|email| !email.is_empty())
+        .map(str::to_lowercase);
+    if email.as_ref().is_some_and(|email| !email.validate_email()) {
+        return dashboard_response(
+            &state,
+            &user,
+            None,
+            Some("enter a valid email address".into()),
+        )
+        .await;
+    }
     if name.as_ref().is_some_and(|s| s.len() > 64) {
         return Err(AppError::bad_request("display_name must be <= 64 chars"));
     }
     if bio.as_ref().is_some_and(|s| s.len() > 500) {
         return Err(AppError::bad_request("bio must be <= 500 chars"));
     }
-    db::update_profile(&state.pool, &user.id, name.as_deref(), bio.as_deref()).await?;
+    let updated = sqlx::query(
+        "UPDATE users SET display_name = $1, bio = $2, email = $3 WHERE id = $4",
+    )
+    .bind(name.as_deref())
+    .bind(bio.as_deref())
+    .bind(email.as_deref())
+    .bind(user.id)
+    .execute(&state.pool)
+    .await;
+    match updated {
+        Ok(_) => {}
+        Err(error) if is_unique_violation(&error) => {
+            return dashboard_response(
+                &state,
+                &user,
+                None,
+                Some("email is already in use".into()),
+            )
+            .await;
+        }
+        Err(error) => return Err(AppError::from(error)),
+    }
     Ok(Redirect::to("/account").into_response())
 }
 
@@ -429,8 +544,14 @@ pub async fn dashboard_paste_visibility(
 // ---- API tokens ----
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TokenForm {
     pub label: Option<String>,
+    pub scope_upload: Option<String>,
+    pub scope_paste: Option<String>,
+    pub scope_delete: Option<String>,
+    pub scope_read: Option<String>,
+    pub expiry: Option<String>,
 }
 
 pub async fn create_token(
@@ -447,17 +568,59 @@ pub async fn create_token(
     if label.len() > 64 {
         return Err(AppError::bad_request("label must be <= 64 chars"));
     }
+    let requested: Vec<&str> = [
+        f.scope_upload.as_deref(),
+        f.scope_paste.as_deref(),
+        f.scope_delete.as_deref(),
+        f.scope_read.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if requested
+        .iter()
+        .any(|scope| !crate::identity::API_SCOPES.contains(scope))
+    {
+        return Err(AppError::bad_request("invalid token scope"));
+    }
+    let scopes: Vec<String> = crate::identity::API_SCOPES
+        .iter()
+        .filter(|scope| requested.contains(scope))
+        .map(|scope| (*scope).to_string())
+        .collect();
+    if scopes.is_empty() {
+        return Err(AppError::bad_request("select at least one token scope"));
+    }
+    let expires_at = match f.expiry.as_deref().unwrap_or("never") {
+        "7d" => Some(Utc::now() + Duration::days(7)),
+        "30d" => Some(Utc::now() + Duration::days(30)),
+        "90d" => Some(Utc::now() + Duration::days(90)),
+        "never" => None,
+        _ => return Err(AppError::bad_request("invalid token expiry")),
+    };
     let raw = auth::new_api_token();
     let hash = auth::api_token_hash(&state.env.session_secret, &raw);
-    db::insert_token(&state.pool, &Uuid::new_v4(), &user.id, &hash, &label).await?;
+    db::insert_token(
+        &state.pool,
+        &Uuid::new_v4(),
+        &user.id,
+        &hash,
+        &label,
+        &scopes,
+        expires_at,
+    )
+    .await?;
     tracing::info!(user = %user.username, "api token created");
     if !wants_html(&headers) {
-        return Ok(
-            Json(json!({"token": raw, "note": "treat like a password; it is shown once"}))
-                .into_response(),
-        );
+        return Ok(Json(json!({
+            "token": raw,
+            "scopes": scopes,
+            "expires_at": expires_at,
+            "note": "treat like a password; it is shown once"
+        }))
+        .into_response());
     }
-    dashboard_response(&state, &user, Some(raw)).await
+    dashboard_response(&state, &user, Some(raw), None).await
 }
 
 pub async fn revoke_token(

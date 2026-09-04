@@ -1,9 +1,17 @@
 {% extends "layout.html" %}
 {% block title %}your uploads · {{ instance_name }}{% endblock %}
+{% block head %}<script src="/static/passkey.js" defer></script>{% endblock %}
 {% block content %}
 {% match user %}
 {% when Some with (u) %}
 <h1>hi, {{ u.username }}</h1>
+{% match quota_bytes %}
+{% when Some with (quota) %}
+<p class="hint">storage: {{ storage_used_human }} of {{ quota }} B</p>
+<progress aria-label="storage quota used" value="{{ storage_used }}" max="{{ quota }}"></progress>
+{% when None %}
+<p class="hint">storage: {{ storage_used_human }} · unlimited</p>
+{% endmatch %}
 {% match just_created_token %}
 {% when Some with (t) %}
 <p class="notice">new API token (shown once — treat it like a password):<br><code class="token">{{ t }}</code></p>
@@ -49,6 +57,9 @@
 </section>
 <section>
 <h2>profile</h2>
+{% match profile_error %}
+{% when Some with (error) %}<p class="notice">{{ error }}</p>
+{% when None %}{% endmatch %}
 {% match avatar_url %}
 {% when Some with (a) %}<img class="avatar" src="{{ a }}" alt="your avatar" width="72" height="72">
 {% when None %}{% endmatch %}
@@ -57,6 +68,12 @@
 {% match u.display_name %}
 {% when Some with (d) %}<input type="text" name="display_name" maxlength="64" value="{{ d }}">
 {% when None %}<input type="text" name="display_name" maxlength="64">
+{% endmatch %}
+</label>
+<label class="field">email
+{% match u.email %}
+{% when Some with (email) %}<input type="email" name="email" maxlength="320" autocomplete="email" value="{{ email }}">
+{% when None %}<input type="email" name="email" maxlength="320" autocomplete="email">
 {% endmatch %}
 </label>
 <label class="field">bio
@@ -76,7 +93,12 @@
 <h2>API tokens</h2>
 <ul class="items">
 {% for t in tokens %}
-<li><code>{{ t.id }}</code> <span class="dim">{{ t.label }} · created {{ t.created_at }} · last used {% match t.last_used_at %}{% when Some with (u) %}{{ u }}{% when None %}never{% endmatch %}</span>
+<li><code>{{ t.id }}</code>
+<span class="dim">{{ t.label }} · scopes:
+{% for scope in t.scopes %}{{ scope }}{% if !loop.last %}, {% endif %}{% endfor %}
+· created {{ t.created_at }} · last used {% match t.last_used_at %}{% when Some with (used) %}{{ used }}{% when None %}never{% endmatch %}
+· {% match t.expires_at %}{% when Some with (expiry) %}expires {{ expiry }}{% if expiry <= &now %} <strong>expired</strong>{% endif %}{% when None %}never expires{% endmatch %}
+</span>
 <form method="post" action="/account/tokens/{{ t.id }}/revoke"><button type="submit">revoke</button></form>
 </li>
 {% endfor %}
@@ -85,8 +107,43 @@
 <label class="field">new token label
 <input type="text" name="label" maxlength="64" placeholder="sharex on laptop">
 </label>
+<fieldset>
+<legend>scopes</legend>
+<label><input type="checkbox" name="scope_upload" value="upload" checked> upload</label>
+<label><input type="checkbox" name="scope_paste" value="paste" checked> paste</label>
+<label><input type="checkbox" name="scope_delete" value="delete" checked> delete</label>
+<label><input type="checkbox" name="scope_read" value="read" checked> read</label>
+</fieldset>
+<label class="field">expires
+<select name="expiry">
+<option value="7d">7 days</option>
+<option value="30d" selected>30 days</option>
+<option value="90d">90 days</option>
+<option value="never">never</option>
+</select>
+</label>
 <button type="submit">create token</button>
 </form>
+<h2>passkeys</h2>
+{% if passkeys.is_empty() %}<p class="hint">no passkeys registered.</p>{% endif %}
+<ul class="items">
+{% for p in passkeys %}
+<li>{{ p.name }} <span class="dim">added {{ p.created_at }}</span>
+<form method="post" action="/account/passkeys/{{ p.id }}/delete"><button type="submit">remove</button></form>
+</li>
+{% endfor %}
+</ul>
+{% if webauthn_enabled %}
+<form id="passkey-register">
+<label class="field">new passkey name
+<input type="text" name="name" maxlength="64" placeholder="this device">
+</label>
+<button type="submit">add passkey</button>
+</form>
+<p id="passkey-register-status" class="hint" role="status"></p>
+{% else %}
+<p class="hint">passkeys are unavailable on this instance.</p>
+{% endif %}
 <h2>login</h2>
 {% if oidc_linked %}
 <p class="hint">an OIDC identity is linked to this account.</p>

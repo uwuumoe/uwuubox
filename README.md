@@ -48,6 +48,14 @@ limits, and toggles live in the `instance_config` table and are edited at
 | `UWUU_OIDC_DISCOVERY_URL` | oidc only | — | **issuer** URL, e.g. `https://accounts.google.com` (discovery doc is derived) |
 | `UWUU_OIDC_CLIENT_ID` / `UWUU_OIDC_CLIENT_SECRET` | oidc only | — | — |
 | `UWUU_OIDC_REDIRECT_URL` | oidc only | — | must exactly match the provider's registered callback, e.g. `https://you.host/oidc/callback` |
+| `UWUU_SMTP_HOST` / `UWUU_SMTP_PORT` | no | — / `587` | password-reset mail; unset disables reset mail |
+| `UWUU_SMTP_USER` / `UWUU_SMTP_PASS` | no | — | SMTP auth (optional) |
+| `UWUU_SMTP_FROM` | smtp only | — | `From:` address for reset mail |
+| `UWUU_SMTP_STARTTLS` | no | `true` | set `false` for plaintext relays |
+| `UWUU_SCAN_COMMAND` | no | — | external scan hook (`cmd <path> <mime>`); exit 0 clean, 3 infected |
+| `UWUU_SCAN_TIMEOUT_SECS` | no | `30` | per-file scan timeout |
+| `UWUU_SCAN_FAIL_OPEN` | no | `false` | allow uploads when the scanner errors |
+| `UWUU_OTEL_ENDPOINT` | no | — | OTLP/HTTP trace export; unset keeps local logs only |
 
 Instance defaults (seeded by migration, editable in admin UI):
 `max_file_bytes` 100 MB · `anonymous_max_bytes` 25 MB · `max_paste_bytes`

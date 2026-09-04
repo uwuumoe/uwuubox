@@ -12,6 +12,7 @@ mod metrics;
 mod mime;
 mod oidc;
 mod ratelimit;
+mod range;
 mod routes;
 mod scan;
 mod state;
