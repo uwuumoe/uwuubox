@@ -36,6 +36,7 @@
 <button type="submit">upload</button>
 </form>
 <progress id="bar" max="100" value="0" hidden></progress>
+<p id="upstat" class="hint" aria-live="polite" hidden></p>
 <div id="result" aria-live="polite"></div>
 <p class="hint">or <a href="/paste">paste some text</a> · uploads are unlisted by default · <code>curl -F file=@x.png {{ base_url }}/api/upload</code></p>
 <script src="/static/upload.js" defer></script>
