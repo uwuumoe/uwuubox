@@ -19,6 +19,7 @@ mod routes;
 mod scan;
 mod state;
 mod storage;
+mod thumb;
 mod views;
 use std::{net::SocketAddr, time::Duration};
 

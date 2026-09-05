@@ -292,6 +292,19 @@ async fn upload_inner(
             return Err(AppError::from(error));
         }
     }
+    // Video thumbnails for link embeds: best-effort, skipped for
+    // burn-armed or password-protected uploads (no public first frame).
+    let thumb_key = if crate::thumb::thumbnailed_mime(&sniffed) && !burn_after_read && access_password_hash.is_none() {
+        match crate::thumb::generate_video_thumb(&spooled.path, "ffmpeg").await {
+            Ok(jpeg) => crate::routes::files::store_thumbnail(&state, &core, jpeg).await,
+            Err(error) => {
+                tracing::warn!(%core, error = %error, "video thumbnail skipped");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let delete_token_raw = auth::new_delete_token();
     let delete_token_hash = auth::delete_token_hash(&state.env.session_secret, &delete_token_raw);
@@ -299,8 +312,8 @@ async fn upload_inner(
         "INSERT INTO files
          (id_core, ext, owner_id, original_name, size_bytes, mime_stored, sha256,
           storage_key, visibility, burn_after_read, access_password_hash,
-          scan_status, expires_at, delete_token_hash)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+          scan_status, expires_at, delete_token_hash, thumb_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
     )
     .bind(&core)
     .bind(&ext)
@@ -316,10 +329,14 @@ async fn upload_inner(
     .bind(scan_status)
     .bind(expires_at)
     .bind(&delete_token_hash)
+    .bind(&thumb_key)
     .execute(&state.pool)
     .await;
     if let Err(error) = inserted {
         rollback_object(&state, &storage_key).await;
+        if let Some(thumb_key) = &thumb_key {
+            rollback_object(&state, thumb_key).await;
+        }
         return Err(AppError::from(error));
     }
 

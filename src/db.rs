@@ -68,6 +68,7 @@ pub struct FileRow {
     pub access_password_hash: Option<String>,
     pub scan_status: String,
     pub expires_at: Option<DateTime<Utc>>,
+    pub thumb_key: Option<String>,
     pub delete_token_hash: Option<String>,
     pub created_at: DateTime<Utc>,
 }

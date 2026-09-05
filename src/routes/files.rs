@@ -133,6 +133,143 @@ async fn collect_stream(
     Ok(out)
 }
 
+/// Store thumbnail JPEG bytes as a deduped object; `None` on any failure
+/// (thumbnails are best-effort, never fatal).
+pub async fn store_thumbnail(state: &AppState, core: &str, jpeg: Vec<u8>) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(&jpeg).to_vec();
+    let size = i64::try_from(jpeg.len()).ok()?;
+    let candidate = format!("thumbs/{core}.jpg");
+    let (key, is_new) =
+        db::acquire_object(&state.pool, &digest, &candidate, size, "image/jpeg")
+            .await
+            .map_err(|error| {
+                tracing::warn!(%core, error = %error, "thumbnail object acquire failed");
+                error
+            })
+            .ok()?;
+    if is_new {
+        if let Err(error) = state.store.put(&key, Bytes::from(jpeg), "image/jpeg").await {
+            tracing::warn!(%core, error = %error, "thumbnail store put failed");
+            rollback_thumbnail(state, &key).await;
+            return None;
+        }
+    }
+    Some(key)
+}
+
+async fn rollback_thumbnail(state: &AppState, key: &str) {
+    match db::release_object(&state.pool, key).await {
+        Ok(true) => {
+            if let Err(error) = state.store.delete(key).await {
+                tracing::error!(error = %error, key = %key, "thumbnail rollback delete failed");
+            }
+        }
+        Ok(false) => {}
+        Err(error) => tracing::error!(error = %error, key = %key, "thumbnail rollback failed"),
+    }
+}
+
+/// Backfill a missing thumbnail for an old video row: stream the stored
+/// bytes to a temp file (never RAM), extract a frame, persist the object,
+/// and link the row. Retried on the next crawler hit when anything fails.
+pub async fn ensure_thumbnail(state: &AppState, file: &FileRow) -> Option<String> {
+    if let Some(key) = file.thumb_key.clone() {
+        return Some(key);
+    }
+    if !crate::thumb::thumbnailed_mime(&file.mime_stored)
+        || file.burn_after_read
+        || file.access_password_hash.is_some()
+    {
+        return None;
+    }
+    let core = file.id_core.trim_end().to_string();
+    let size = u64::try_from(file.size_bytes).ok()?;
+    let mut stream = state.store.get_stream(&file.storage_key, size).await.ok()?;
+    let path = std::env::temp_dir().join(format!(
+        "uwuubox-thumb-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4().as_simple()
+    ));
+    let fetch = async {
+        use tokio::io::AsyncWriteExt;
+        use tokio_stream::StreamExt;
+        let mut options = tokio::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut out = options.open(&path).await?;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|error| std::io::Error::other(error.to_string()))?;
+            out.write_all(&chunk).await?;
+        }
+        out.flush().await?;
+        Ok::<(), std::io::Error>(())
+    }
+    .await;
+    struct Sweep(std::path::PathBuf);
+    impl Drop for Sweep {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let _sweep = Sweep(path.clone());
+    if let Err(error) = fetch {
+        tracing::warn!(%core, error = %error, "thumbnail backfill fetch failed");
+        return None;
+    }
+    let jpeg = crate::thumb::generate_video_thumb(&path, "ffmpeg")
+        .await
+        .map_err(|error| tracing::warn!(%core, error = %error, "thumbnail backfill generate failed"))
+        .ok()?;
+    let key = store_thumbnail(state, &core, jpeg).await?;
+    let linked = sqlx::query("UPDATE files SET thumb_key = $1 WHERE id_core = $2 AND thumb_key IS NULL")
+        .bind(&key)
+        .bind(&file.id_core)
+        .execute(&state.pool)
+        .await
+        .map_err(|error| {
+            tracing::warn!(%core, error = %error, "thumbnail backfill link failed");
+        })
+        .ok()?;
+    if linked.rows_affected() == 0 {
+        // Lost the race with another backfill: drop our extra reference and
+        // use the winner's key.
+        rollback_thumbnail(state, &key).await;
+        return db::find_file(&state.pool, &file.id_core)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| row.thumb_key);
+    }
+    Some(key)
+}
+pub async fn thumb(
+    State(state): State<AppState>,
+    Path(segment): Path<String>,
+) -> Result<Response, AppError> {
+    let core = ids::strip_to_core(&segment);
+    if core.is_empty() || ids::is_reserved(core) {
+        return Err(AppError::NotFound);
+    }
+    let file = db::find_file(&state.pool, core).await?.ok_or(AppError::NotFound)?;
+    if db::is_expired(file.expires_at)
+        || file.burn_after_read
+        || file.access_password_hash.is_some()
+    {
+        return Err(AppError::NotFound);
+    }
+    let key = file.thumb_key.as_deref().ok_or(AppError::NotFound)?;
+    let bytes = state.store.get(key).await?;
+    let mut response = range::response(range::RangeOutcome::Full, bytes.len() as u64, bytes)
+        .into_response();
+    let headers = response.headers_mut();
+    headers.insert(CONTENT_TYPE, "image/jpeg".parse().unwrap());
+    headers.insert(CACHE_CONTROL, "public, max-age=31536000, immutable".parse().unwrap());
+    headers.insert("X-Content-Type-Options", "nosniff".parse().unwrap());
+    Ok(response)
+}
+
 pub async fn preview(
     State(state): State<AppState>,
     session: Session,
@@ -156,6 +293,25 @@ pub async fn preview(
     let unlocked = is_unlocked(&session, &file).await;
     let protected_and_locked = file.access_password_hash.is_some() && !unlocked;
     let kind = file_kind(&file.mime_stored);
+    let crawler = crate::thumb::embed_crawler(
+        headers.get(USER_AGENT).and_then(|value| value.to_str().ok()),
+    );
+    let thumbnailed = crate::thumb::thumbnailed_mime(&file.mime_stored)
+        && !file.burn_after_read
+        && file.access_password_hash.is_none();
+    // Crawlers download the whole og:video before embedding; above the
+    // ceiling that always times out, so point them at the thumbnail card.
+    // Missing thumbs for old rows backfill in the background: this response
+    // stays fast, the crawler's next fetch picks the card up.
+    let large_video =
+        thumbnailed && file.size_bytes > crate::thumb::EMBED_VIDEO_MAX_BYTES;
+    if crawler && large_video && file.thumb_key.is_none() {
+        let worker = state.clone();
+        let row = file.clone();
+        tokio::spawn(async move {
+            ensure_thumbnail(&worker, &row).await;
+        });
+    }
     let text_snippet = if !file.burn_after_read
         && !protected_and_locked
         && kind == "text"
@@ -196,9 +352,21 @@ pub async fn preview(
         is_owner,
         kind,
         text_snippet,
-        raw_url,
+        raw_url: raw_url.clone(),
         preview_url: preview_url.clone(),
         oembed_url: format!("{}/api/oembed?url={preview_url}", state.env.base_url),
+        thumb_url: if file.burn_after_read || file.access_password_hash.is_some() {
+            None
+        } else {
+            file.thumb_key.as_ref().map(|_| {
+                format!("{}/thumbs/{}", state.env.base_url, file.id_core.trim_end())
+            })
+        },
+        og_video_url: if crawler && large_video {
+            None
+        } else {
+            Some(raw_url.clone())
+        },
         file,
     };
     page.render()
@@ -362,16 +530,21 @@ pub async fn remove_file<C: FileRemovalContext + ?Sized>(
     context: &C,
     row: &FileRow,
 ) -> Result<bool, AppError> {
-    let storage_key: Option<String> =
-        sqlx::query_scalar("DELETE FROM files WHERE id_core = $1 RETURNING storage_key")
+    let removed: Option<(String, Option<String>)> =
+        sqlx::query_as("DELETE FROM files WHERE id_core = $1 RETURNING storage_key, thumb_key")
             .bind(&row.id_core)
             .fetch_optional(context.pool())
             .await?;
-    let Some(storage_key) = storage_key else {
+    let Some((storage_key, thumb_key)) = removed else {
         return Ok(false);
     };
     if db::release_object(context.pool(), &storage_key).await? {
         context.store().delete(&storage_key).await?;
+    }
+    if let Some(thumb_key) = thumb_key {
+        if db::release_object(context.pool(), &thumb_key).await? {
+            context.store().delete(&thumb_key).await?;
+        }
     }
     Ok(true)
 }

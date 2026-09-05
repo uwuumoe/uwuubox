@@ -103,6 +103,7 @@ pub fn build_router(state: AppState, session_layer: SessionManagerLayer<Postgres
         .route("/api/oembed", get(oembed::get))
         // files
         .route("/f/{core}", get(files::preview))
+        .route("/thumbs/{core}", get(files::thumb))
         .route("/f/{core}/unlock", post(files::unlock))
         .route("/api/files/{core}", delete(files::delete_file))
         .route("/api/files/{core}", patch(files::toggle_file))

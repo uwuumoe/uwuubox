@@ -26,13 +26,19 @@
 {% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
 <meta name="twitter:card" content="summary">
 {% else if file.mime_stored == "video/mp4" || file.mime_stored == "video/webm" %}
-<meta property="og:video" content="{{ raw_url }}">
-<meta property="og:video:secure_url" content="{{ raw_url }}">
+{% match thumb_url %}{% when Some with (t) %}<meta property="og:image" content="{{ t }}">{% when None %}{% endmatch %}
+{% match og_video_url %}
+{% when Some with (v) %}
+<meta property="og:video" content="{{ v }}">
+<meta property="og:video:secure_url" content="{{ v }}">
 <meta property="og:video:type" content="{{ file.mime_stored }}">
 <meta name="twitter:card" content="player">
 <meta name="twitter:player" content="{{ preview_url }}">
 <meta name="twitter:player:width" content="1280">
 <meta name="twitter:player:height" content="720">
+{% when None %}
+<meta name="twitter:card" content="summary_large_image">
+{% endmatch %}
 {% else %}
 {% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
 <meta name="twitter:card" content="summary">

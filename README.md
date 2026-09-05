@@ -128,6 +128,11 @@ ShareX custom uploader (`DestinationType: ImageUploader, FileUploader`):
   Admin knobs: `allow_never_expiry` master switch (on by default) and
   `allow_anonymous_never_expiry` extension for anonymous uploads (off by
   default; disallowed `never` → `400`).
+- **Video embeds:** mp4/webm uploads get a thumbnail (frame + play button,
+  via ffmpeg) used as `og:image`. Chat crawlers download the whole `og:video`
+  before embedding, so videos over 25 MiB serve crawlers the thumbnail card
+  instead of the file (browser embeds are unchanged). No thumbnails for
+  burn-after-read or password-protected videos.
 - **Visibility:** unlisted by default; `public` uploads (anonymous or authed,
   subject to role) appear on the `/explore` feed and on `/u/<you>` for authed
   users. Admin routes 404 for non-admins (no account-enumeration oracle).
