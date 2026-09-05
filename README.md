@@ -123,16 +123,50 @@ ShareX custom uploader (`DestinationType: ImageUploader, FileUploader`):
   at upload (`415` naming the MIME).
 - **Expiry:** `expires_in_secs` is clamped to `[min, max]`; a sweeper deletes
   objects then rows every 5 minutes. No permanent keeps in v1 (max 30 d).
-- **Visibility:** unlisted by default; `public` needs an account and lists on
-  `/u/<you>`. Anonymous uploads are never enumerated. Admin routes 404 for
-  non-admins (no account-enumeration oracle).
+- **Visibility:** unlisted by default; `public` uploads (anonymous or authed,
+  subject to role) appear on the `/explore` feed and on `/u/<you>` for authed
+  users. Admin routes 404 for non-admins (no account-enumeration oracle).
 - **Rate limits:** 60 uploads/hr/IP overall, 10/hr/IP anonymous,
-  5 auth attempts/min/IP. No range/resume in v1 (single `200` responses).
+  5 auth attempts/min/IP, 20 comment posts/min/IP. Raw file/paste bytes support
+  single `Range` requests (206); no resumable uploads.
 - **Cookies** are `__Host-` prefixed, `HttpOnly+Secure+SameSite=Lax`; use a
   `localhost`/`127.0.0.1` URL (secure contexts) or HTTPS locally.
 
-## v1 non-goals
+## Non-goals (will not be added)
 
-tus/resumable uploads, raw-PUT uploads, email/password-reset, multiple OIDC
-providers, custom slugs, permanent keeps, burn-after-read, image resizing,
-NSFW scanning, root-compat shims for other services.
+tus/resumable uploads, raw-PUT uploads, multiple OIDC
+providers, custom slugs, permanent keeps, image resizing,
+root-compat shims for other services, federation.
+
+## Backup & restore
+
+Dump the database through the Compose database service:
+
+```sh
+docker compose exec -T db pg_dump -U uwuubox -d uwuubox -Fc > uwuubox.dump
+```
+
+For local storage, copy the entire object root (the Compose volume is normally
+`/var/lib/docker/volumes/<project>_uwu-data/_data/` on the Docker host):
+
+```sh
+rsync -a /path/to/UWUU_LOCAL_DIR/ backup/objects/
+```
+
+For an S3 backend, copy the whole bucket with `aws s3 sync` or `rclone sync`,
+including both the `files/` and `avatars/` prefixes.
+
+Restore in this order: stop the app, restore PostgreSQL, restore the objects,
+then start the app (migrations run on boot). Keep the same
+`UWUU_SESSION_SECRET` and the same S3 credentials:
+
+```sh
+docker compose stop app
+docker compose exec -T db pg_restore -U uwuubox -d uwuubox --clean --if-exists < uwuubox.dump
+rsync -a backup/objects/ /path/to/UWUU_LOCAL_DIR/
+docker compose start app
+```
+
+Do not back up `target/` or temporary scan files. The expiry sweeper runs every
+five minutes, so a database restored from a different point in time may refer
+to objects that were already swept; run GC after restore, starting with a dry run.

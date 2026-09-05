@@ -4,12 +4,19 @@
 
 pub mod accounts;
 pub mod admin;
+pub mod audit;
+pub mod collections;
+pub mod comments;
 pub mod common;
+pub mod explore;
 pub mod files;
+pub mod gc;
 pub mod invites;
+pub mod metrics;
+pub mod oembed;
 pub mod pages;
-pub mod pastes;
 pub mod passkeys;
+pub mod pastes;
 pub mod reset;
 pub mod roles;
 pub mod upload;
@@ -34,6 +41,7 @@ pub fn build_router(
     session_layer: SessionManagerLayer<PostgresStore>,
     boot_body_limit: usize,
 ) -> Router {
+    let http_metrics = state.metrics.clone();
     // 60 uploads/hr/IP ceiling; anonymous 10/hr additionally enforced in-handler
     // (authed-vs-anon can't split at the routing layer).
     let upload_governor = {
@@ -57,20 +65,32 @@ pub fn build_router(
         );
         GovernorLayer::new(config)
     };
+    // Comment creation: burst 20, replenished at 20/min/IP.
+    let comments_governor = {
+        let config: Arc<_> = Arc::new(
+            GovernorConfigBuilder::default()
+                .period(Duration::from_secs(3))
+                .burst_size(20)
+                .finish()
+                .expect("governor config"),
+        );
+        GovernorLayer::new(config)
+    };
 
     let throttled_uploads = Router::new()
         .route("/api/upload", post(upload::upload))
         .route("/api/pastes", post(pastes::create_paste))
         .layer(upload_governor);
 
+    let throttled_comments = Router::new()
+        .route("/api/comments", post(comments::create))
+        .layer(comments_governor);
+
     let throttled_auth = Router::new()
         .route("/login", post(accounts::login_post))
         .route("/register", post(accounts::register_post))
         .route("/forgot", post(reset::forgot_post))
-        .route(
-            "/passkeys/auth/start",
-            post(passkeys::authentication_start),
-        )
+        .route("/passkeys/auth/start", post(passkeys::authentication_start))
         .route(
             "/passkeys/auth/finish",
             post(passkeys::authentication_finish),
@@ -80,7 +100,10 @@ pub fn build_router(
     Router::new()
         .route("/", get(pages::index))
         .route("/health", get(pages::health))
+        .route("/metrics", get(metrics::render))
         .route("/paste", get(pages::new_paste))
+        .route("/explore", get(explore::page))
+        .route("/api/oembed", get(oembed::get))
         // files
         .route("/f/{core}", get(files::preview))
         .route("/f/{core}/unlock", post(files::unlock))
@@ -90,8 +113,25 @@ pub fn build_router(
         // pastes
         .route("/p/{core}", get(pastes::view_paste))
         .route("/p/{core}/raw", get(pastes::raw_paste))
+        .route("/p/{core}/unlock", post(pastes::unlock))
         .route("/api/pastes/{core}", delete(pastes::delete_paste))
         .route("/api/pastes/{core}", patch(pastes::toggle_paste))
+        // collections
+        .route("/c/{id}", get(collections::view))
+        .route("/api/collections", post(collections::create))
+        .route(
+            "/api/collections/{id}",
+            patch(collections::update).delete(collections::delete),
+        )
+        .route(
+            "/api/collections/{id}/items",
+            post(collections::add_item)
+                .patch(collections::reorder)
+                .delete(collections::remove_item),
+        )
+        // comments
+        .route("/api/comments", get(comments::list))
+        .route("/api/comments/{id}", delete(comments::delete))
         // accounts
         .route("/register", get(accounts::register_form))
         .route("/login", get(accounts::login_form))
@@ -142,6 +182,8 @@ pub fn build_router(
         .route("/oidc/callback", get(crate::oidc::callback))
         // admin
         .route("/admin", get(admin::admin_page))
+        .route("/admin/audit", get(audit::list))
+        .route("/admin/gc", post(gc::run))
         .route("/admin/config", post(admin::update_config))
         .route("/admin/users/{id}/grant", post(admin::grant))
         .route("/admin/roles", post(roles::create_role))
@@ -155,25 +197,20 @@ pub fn build_router(
             "/admin/roles/{id}/oidc-groups/remove",
             post(roles::remove_oidc_mapping),
         )
-        .route(
-            "/admin/users/{id}/role",
-            post(roles::update_user_role),
-        )
+        .route("/admin/users/{id}/role", post(roles::update_user_role))
         .route("/admin/invites", post(invites::create_invite))
-        .route(
-            "/admin/invites/{code}/revoke",
-            post(invites::revoke_invite),
-        )
+        .route("/admin/invites/{code}/revoke", post(invites::revoke_invite))
         .merge(throttled_uploads)
         .merge(throttled_auth)
+        .merge(throttled_comments)
         .nest_service("/static", tower_http::services::ServeDir::new("static"))
         // root-raw byte serving: registered last, reserved words guarded.
         .route("/{core}", get(files::raw))
         .layer(RequestBodyLimitLayer::new(boot_body_limit))
         // Axum's own 2MB default would shadow the boot limit + per-role caps.
         .layer(DefaultBodyLimit::disable())
-        .layer(TraceLayer::new_for_http().make_span_with(
-            |request: &axum::extract::Request| {
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &axum::extract::Request| {
                 // Path only: DefaultMakeSpan would log request.uri including
                 // `?password=` unlock secrets.
                 tracing::debug_span!(
@@ -181,8 +218,12 @@ pub fn build_router(
                     method = %request.method(),
                     path = %request.uri().path()
                 )
-            },
-        ))
+            }),
+        )
         .layer(session_layer)
+        .layer(axum::middleware::map_response_with_state(
+            http_metrics,
+            metrics::count_status,
+        ))
         .with_state(state)
 }

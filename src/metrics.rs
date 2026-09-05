@@ -15,7 +15,7 @@ pub struct Metrics {
     pub sweeper_runs: IntCounter,
     pub files_swept: IntCounter,
     pub pastes_swept: IntCounter,
-    /// `class`: 2xx | 4xx | 5xx
+    /// `class`: 2xx | 3xx | 4xx | 5xx
     pub http: IntCounterVec,
 }
 
@@ -33,9 +33,17 @@ impl Metrics {
             Ok::<_, prometheus::Error>(c)
         };
         Ok(Self {
-            uploads: mk_vec("uwuubox_uploads_total", "file uploads by outcome", &["status"])?,
+            uploads: mk_vec(
+                "uwuubox_uploads_total",
+                "file uploads by outcome",
+                &["status"],
+            )?,
             upload_bytes: mk("uwuubox_upload_bytes_total", "uploaded file bytes accepted")?,
-            pastes: mk_vec("uwuubox_pastes_total", "paste creates by outcome", &["status"])?,
+            pastes: mk_vec(
+                "uwuubox_pastes_total",
+                "paste creates by outcome",
+                &["status"],
+            )?,
             sweeper_runs: mk("uwuubox_sweeper_runs_total", "expiry sweeper passes")?,
             files_swept: mk("uwuubox_files_swept_total", "expired files removed")?,
             pastes_swept: mk("uwuubox_pastes_swept_total", "expired pastes removed")?,

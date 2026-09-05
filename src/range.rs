@@ -150,10 +150,7 @@ mod tests {
                 "{header}"
             );
         }
-        assert_eq!(
-            parse(Some("bytes=0-"), 0),
-            RangeOutcome::Unsatisfiable
-        );
+        assert_eq!(parse(Some("bytes=0-"), 0), RangeOutcome::Unsatisfiable);
         assert_eq!(parse(Some("bytes=-1"), 0), RangeOutcome::Unsatisfiable);
     }
 }

@@ -147,7 +147,10 @@ async fn start_login(
         .insert("oidc_csrf", csrf.secret().to_string())
         .await
         .map_err(|error| AppError::internal(error.to_string()))?;
-    match invite.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()) {
+    match invite
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
         Some(invite) => session
             .insert("oidc_invite", invite)
             .await
@@ -396,4 +399,3 @@ pub async fn callback(
     tracing::info!(username = %username, issuer = %issuer, "OIDC account provisioned");
     Ok(Redirect::to("/account").into_response())
 }
-

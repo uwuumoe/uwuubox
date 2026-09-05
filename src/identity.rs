@@ -67,7 +67,11 @@ impl TokenIdentityRow {
 }
 
 async fn session_user(pool: &PgPool, session: &Session) -> Option<User> {
-    let uid = session.get::<String>(SESSION_USER_ID).await.ok().flatten()?;
+    let uid = session
+        .get::<String>(SESSION_USER_ID)
+        .await
+        .ok()
+        .flatten()?;
     let id = uid.parse::<Uuid>().ok()?;
     match db::find_user_by_id(pool, &id).await {
         Ok(user) => user,

@@ -138,19 +138,15 @@ async fn upload_inner(
                 bytes = Some(data);
             }
             "expires_in_secs" => {
-                expires_raw = Some(
-                    field
-                        .text()
-                        .await
-                        .map_err(|error| {
-                            AppError::bad_request(format!("bad expires_in_secs: {error}"))
-                        })?,
-                );
+                expires_raw = Some(field.text().await.map_err(|error| {
+                    AppError::bad_request(format!("bad expires_in_secs: {error}"))
+                })?);
             }
             "visibility" => {
-                visibility_raw = Some(field.text().await.map_err(|error| {
-                    AppError::bad_request(format!("bad visibility: {error}"))
-                })?);
+                visibility_raw =
+                    Some(field.text().await.map_err(|error| {
+                        AppError::bad_request(format!("bad visibility: {error}"))
+                    })?);
             }
             "burn_after_read" => {
                 burn_raw = Some(field.text().await.map_err(|error| {
@@ -163,9 +159,10 @@ async fn upload_inner(
                 })?);
             }
             "strip_exif" => {
-                strip_exif_raw = Some(field.text().await.map_err(|error| {
-                    AppError::bad_request(format!("bad strip_exif: {error}"))
-                })?);
+                strip_exif_raw =
+                    Some(field.text().await.map_err(|error| {
+                        AppError::bad_request(format!("bad strip_exif: {error}"))
+                    })?);
             }
             _ => {}
         }
@@ -177,9 +174,7 @@ async fn upload_inner(
         return Err(AppError::bad_request("empty file"));
     }
 
-    let strip_default = user
-        .map(|user| user.strip_exif_default)
-        .unwrap_or(false);
+    let strip_default = user.map(|user| user.strip_exif_default).unwrap_or(false);
     let strip_exif = parse_bool_field(strip_exif_raw.as_deref(), strip_default, "strip_exif")?;
     let (bytes, exif_stripped) = if strip_exif {
         strip_image_metadata(Bytes::from(raw_bytes))?
@@ -218,15 +213,10 @@ async fn upload_inner(
             }
             "public"
         }
-        Some(other) => {
-            return Err(AppError::bad_request(format!(
-                "bad visibility: {other:?}"
-            )))
-        }
+        Some(other) => return Err(AppError::bad_request(format!("bad visibility: {other:?}"))),
     };
 
-    let burn_after_read =
-        parse_bool_field(burn_raw.as_deref(), false, "burn_after_read")?;
+    let burn_after_read = parse_bool_field(burn_raw.as_deref(), false, "burn_after_read")?;
     if burn_after_read && !limits.can_burn {
         return Err(AppError::bad_request(
             "burn-after-read is not allowed for your role",
@@ -284,28 +274,17 @@ async fn upload_inner(
     let candidate_key = file_key(&core, &ext);
     let size_bytes =
         i64::try_from(bytes.len()).map_err(|_| AppError::internal("upload length overflow"))?;
-    let (storage_key, is_new) = db::acquire_object(
-        &state.pool,
-        &digest,
-        &candidate_key,
-        size_bytes,
-        &sniffed,
-    )
-    .await?;
+    let (storage_key, is_new) =
+        db::acquire_object(&state.pool, &digest, &candidate_key, size_bytes, &sniffed).await?;
     if is_new {
-        if let Err(error) = state
-            .store
-            .put(&storage_key, bytes.clone(), &sniffed)
-            .await
-        {
+        if let Err(error) = state.store.put(&storage_key, bytes.clone(), &sniffed).await {
             rollback_object(&state, &storage_key).await;
             return Err(AppError::from(error));
         }
     }
 
     let delete_token_raw = auth::new_delete_token();
-    let delete_token_hash =
-        auth::delete_token_hash(&state.env.session_secret, &delete_token_raw);
+    let delete_token_hash = auth::delete_token_hash(&state.env.session_secret, &delete_token_raw);
     let inserted = sqlx::query(
         "INSERT INTO files
          (id_core, ext, owner_id, original_name, size_bytes, mime_stored, sha256,
@@ -360,11 +339,7 @@ async fn upload_inner(
     Ok((response, bytes.len() as u64))
 }
 
-fn parse_bool_field(
-    raw: Option<&str>,
-    default: bool,
-    field: &str,
-) -> Result<bool, AppError> {
+fn parse_bool_field(raw: Option<&str>, default: bool, field: &str) -> Result<bool, AppError> {
     match raw.map(str::trim) {
         None | Some("") => Ok(default),
         Some("1" | "true" | "yes" | "on") => Ok(true),
@@ -392,8 +367,7 @@ fn strip_image_metadata(bytes: Bytes) -> Result<(Bytes, bool), AppError> {
                         || segment.contents().starts_with(XMP)
                         || segment.contents().starts_with(XMP_EXT));
                 let comment = segment.marker() == img_parts::jpeg::markers::COM;
-                let photoshop_metadata =
-                    segment.marker() == img_parts::jpeg::markers::APP13;
+                let photoshop_metadata = segment.marker() == img_parts::jpeg::markers::APP13;
                 !(metadata_app || comment || photoshop_metadata)
             });
             jpeg.segments().len() != before
@@ -454,9 +428,7 @@ async fn rollback_object(state: &AppState, storage_key: &str) {
 mod tests {
     use std::io::{Cursor, Write};
 
-    use zip::{
-        write::SimpleFileOptions, AesMode, CompressionMethod, ZipWriter,
-    };
+    use zip::{write::SimpleFileOptions, AesMode, CompressionMethod, ZipWriter};
 
     use super::zip_has_encrypted_entry;
 
@@ -469,9 +441,8 @@ mod tests {
 
     #[test]
     fn encrypted_zip_detector_reads_entry_flags() {
-        let plain = archive(
-            SimpleFileOptions::default().compression_method(CompressionMethod::Stored),
-        );
+        let plain =
+            archive(SimpleFileOptions::default().compression_method(CompressionMethod::Stored));
         assert!(!zip_has_encrypted_entry(&plain).unwrap());
 
         let encrypted = archive(

@@ -1,6 +1,8 @@
 {% extends "layout.html" %}
 {% block title %}{{ file.original_name }} · {{ instance_name }}{% endblock %}
 {% block head %}
+<link rel="canonical" href="{{ preview_url }}">
+<link rel="alternate" type="application/json+oembed" href="/api/oembed?url={{ preview_url }}" title="{{ file.original_name }}">
 <meta property="og:title" content="{{ file.original_name }}">
 <meta property="og:description" content="{{ size_human }} · expires {{ expires_human }} · {{ instance_name }}">
 <meta property="og:type" content="website">
@@ -16,6 +18,25 @@
 <meta property="og:image" content="{{ raw_url }}">
 <meta name="twitter:card" content="summary_large_image">
 {% endif %}
+{% else if kind == "video" %}
+{% if file.burn_after_read %}
+{% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
+<meta name="twitter:card" content="summary">
+{% else if raw_url.is_empty() %}
+{% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
+<meta name="twitter:card" content="summary">
+{% else if file.mime_stored == "video/mp4" || file.mime_stored == "video/webm" %}
+<meta property="og:video" content="{{ raw_url }}">
+<meta property="og:video:secure_url" content="{{ raw_url }}">
+<meta property="og:video:type" content="{{ file.mime_stored }}">
+<meta name="twitter:card" content="player">
+<meta name="twitter:player" content="{{ preview_url }}">
+<meta name="twitter:player:width" content="1280">
+<meta name="twitter:player:height" content="720">
+{% else %}
+{% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
+<meta name="twitter:card" content="summary">
+{% endif %}
 {% else %}
 {% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
 <meta name="twitter:card" content="summary">
@@ -27,6 +48,7 @@
 <li>{{ size_human }} · {{ file.mime_stored }}</li>
 <li>expires {{ expires_human }}</li>
 <li>sha256 <code>{{ sha256_hex }}</code></li>
+<li>scan {{ file.scan_status }}</li>
 {% match owner_name %}
 {% when Some with (n) %}<li>by <a href="/u/{{ n }}">{{ n }}</a></li>
 {% when None %}<li>anonymous upload</li>
@@ -61,4 +83,20 @@
 <p><a class="button" href="{{ raw_url }}" download>download</a>
 <a class="button ghost" href="{{ raw_url }}">raw link</a></p>
 {% endif %}
+<section data-comments data-target-kind="file" data-target-core="{{ file.id_core }}">
+<h2>comments</h2>
+<ol class="items" data-comment-list><li class="hint">loading comments…</li></ol>
+<p class="hint" data-comment-pages></p>
+{% match user %}
+{% when Some with (_) %}
+<form data-comment-form>
+<label class="field">add a comment
+<textarea name="body" rows="3" maxlength="2000" required></textarea>
+</label>
+<button type="submit">comment</button>
+</form>
+{% when None %}<p class="hint"><a href="/login">log in</a> to comment.</p>
+{% endmatch %}
+<p class="hint" data-comment-status role="status"></p>
+</section>
 {% endblock %}

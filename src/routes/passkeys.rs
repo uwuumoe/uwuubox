@@ -48,10 +48,7 @@ struct CounterRow {
     counter: i64,
 }
 
-pub async fn list_for_user(
-    pool: &PgPool,
-    user_id: &Uuid,
-) -> Result<Vec<PasskeyInfo>, sqlx::Error> {
+pub async fn list_for_user(pool: &PgPool, user_id: &Uuid) -> Result<Vec<PasskeyInfo>, sqlx::Error> {
     sqlx::query_as::<_, PasskeyInfo>(
         "SELECT id, name, created_at FROM passkeys WHERE user_id = $1 ORDER BY created_at DESC",
     )
@@ -116,8 +113,8 @@ pub async fn registration_start(
             .fetch_all(&state.pool)
             .await
             .map_err(|error| AppError::from(error).json())?;
-    let exclude = (!existing.is_empty())
-        .then(|| existing.into_iter().map(CredentialID::from).collect());
+    let exclude =
+        (!existing.is_empty()).then(|| existing.into_iter().map(CredentialID::from).collect());
     let display_name = user.display_name.as_deref().unwrap_or(&user.username);
     let (options, registration) = webauthn
         .start_passkey_registration(user.id, &user.username, display_name, exclude)
@@ -199,7 +196,8 @@ pub async fn registration_finish(
 }
 
 fn serialized_counter(passkey: &Passkey) -> Result<i64, AppError> {
-    let value = serde_json::to_value(passkey).map_err(|error| AppError::internal(error.to_string()))?;
+    let value =
+        serde_json::to_value(passkey).map_err(|error| AppError::internal(error.to_string()))?;
     let counter = value
         .pointer("/cred/counter")
         .and_then(serde_json::Value::as_u64)
@@ -235,7 +233,9 @@ pub async fn authentication_start(
             let passkey: Passkey = serde_json::from_slice(&row.public_key)
                 .map_err(|error| AppError::internal(error.to_string()))?;
             if passkey.cred_id().as_slice() != row.cred_id {
-                return Err(AppError::internal("stored passkey id does not match credential"));
+                return Err(AppError::internal(
+                    "stored passkey id does not match credential",
+                ));
             }
             Ok(passkey)
         })

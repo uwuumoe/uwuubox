@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::{
     config::InstanceConfig,
-    db::{FileRow, InviteCode, PasteRow, Role, TokenInfo, User},
+    db::{Collection, FileRow, InviteCode, PasteRow, Role, TokenInfo, User},
     routes::{passkeys::PasskeyInfo, roles::RoleOidcGroup},
 };
 
@@ -92,13 +92,21 @@ pub struct PastePage {
     pub tagline: String,
     pub icon_url: String,
     pub user: Option<User>,
+    pub core: String,
     pub title: String,
-    pub highlighted: String,
+    pub content_html: String,
     pub highlight_css: String,
     pub language: String,
+    pub format: String,
+    pub is_markdown: bool,
+    pub locked: bool,
+    pub burn_after_read: bool,
     pub expires_human: String,
     pub owner_name: Option<String>,
+    pub is_owner: bool,
     pub raw_url: String,
+    pub canonical_url: String,
+    pub oembed_url: String,
     pub desc: String,
 }
 
@@ -109,7 +117,6 @@ pub struct PasteNewPage {
     pub tagline: String,
     pub icon_url: String,
     pub user: Option<User>,
-    pub authed: bool,
     pub max_paste_bytes: i64,
     pub max_expiry_secs: i64,
 }
@@ -117,7 +124,6 @@ pub struct PasteNewPage {
 impl PasteNewPage {
     pub fn new(cfg: &InstanceConfig, user: Option<User>) -> Self {
         Self {
-            authed: user.is_some(),
             max_paste_bytes: cfg.max_paste_bytes,
             max_expiry_secs: cfg.max_expiry_secs,
             instance_name: cfg.instance_name.clone(),
@@ -126,6 +132,54 @@ impl PasteNewPage {
             user,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct CollectionItemView {
+    pub kind: String,
+    pub core: String,
+    pub title: String,
+    pub url: String,
+    pub detail: String,
+}
+#[derive(Template)]
+#[template(path = "collection.html")]
+pub struct CollectionPage {
+    pub instance_name: String,
+    pub tagline: String,
+    pub icon_url: String,
+    pub user: Option<User>,
+    pub collection: Collection,
+    pub items: Vec<CollectionItemView>,
+    pub owner_name: String,
+    pub is_owner: bool,
+    pub created_human: String,
+    pub canonical_url: String,
+    pub oembed_url: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExploreItemView {
+    pub kind: String,
+    pub title: String,
+    pub url: String,
+    pub detail: String,
+    pub created_human: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Template)]
+#[template(path = "explore.html")]
+pub struct ExplorePage {
+    pub instance_name: String,
+    pub tagline: String,
+    pub icon_url: String,
+    pub user: Option<User>,
+    pub items: Vec<ExploreItemView>,
+    pub page: i64,
+    pub has_next: bool,
+    pub canonical_url: String,
 }
 
 #[derive(Template)]
@@ -139,6 +193,7 @@ pub struct ProfilePage {
     pub avatar_url: Option<String>,
     pub files: Vec<FileRow>,
     pub pastes: Vec<PasteRow>,
+    pub collections: Vec<Collection>,
     pub page: i64,
     pub has_next: bool,
 }

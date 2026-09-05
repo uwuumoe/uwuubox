@@ -1,6 +1,9 @@
 //! On-demand ZIP bundles from live file and paste capability cores.
 
-use std::{collections::HashSet, io::{Cursor, Write}};
+use std::{
+    collections::HashSet,
+    io::{Cursor, Write},
+};
 
 use axum::{
     body::Body,
@@ -126,11 +129,9 @@ async fn create_inner(
         }
         let paste_len = i64::try_from(paste.body.len())
             .map_err(|_| AppError::internal("paste length overflow"))?;
-        total = total
-            .checked_add(paste_len)
-            .ok_or(AppError::TooLarge {
-                max_bytes: limits.max_file_bytes,
-            })?;
+        total = total.checked_add(paste_len).ok_or(AppError::TooLarge {
+            max_bytes: limits.max_file_bytes,
+        })?;
         if total > limits.max_file_bytes {
             return Err(AppError::TooLarge {
                 max_bytes: limits.max_file_bytes,
@@ -152,7 +153,10 @@ async fn create_inner(
             .as_deref()
             .filter(|title| !title.trim().is_empty())
             .unwrap_or_else(|| paste.id_core.trim_end());
-        let name = unique_name(&format!("{}.txt", mime::sanitize_filename(stem)), &mut seen_names);
+        let name = unique_name(
+            &format!("{}.txt", mime::sanitize_filename(stem)),
+            &mut seen_names,
+        );
         entries.push(ArchiveEntry {
             name,
             bytes: Bytes::from(paste.body),
@@ -193,8 +197,7 @@ fn unique_name(requested: &str, seen: &mut HashSet<String>) -> String {
 
 fn build_archive(entries: Vec<ArchiveEntry>) -> zip::result::ZipResult<Vec<u8>> {
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
-    let options =
-        SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     for entry in entries {
         writer.start_file(entry.name, options)?;
         writer.write_all(&entry.bytes)?;

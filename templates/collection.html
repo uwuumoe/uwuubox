@@ -1,0 +1,86 @@
+{% extends "layout.html" %}
+{% block title %}{{ collection.title }} · {{ instance_name }}{% endblock %}
+{% block head %}
+<link rel="canonical" href="{{ canonical_url }}">
+<link rel="alternate" type="application/json+oembed" href="{{ oembed_url }}" title="{{ collection.title }}">
+<meta property="og:title" content="{{ collection.title }}">
+<meta property="og:description" content="{{ description }}">
+<meta property="og:type" content="website">
+<meta property="og:url" content="{{ canonical_url }}">
+{% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
+<meta name="twitter:card" content="summary">
+{% endblock %}
+{% block content %}
+<h1>{{ collection.title }}</h1>
+<ul class="meta">
+<li>{{ collection.visibility }}</li>
+<li>by <a href="/u/{{ owner_name }}">{{ owner_name }}</a></li>
+<li>created {{ created_human }}</li>
+</ul>
+{% if !collection.description.is_empty() %}<p>{{ collection.description }}</p>{% endif %}
+{% if items.is_empty() %}<p class="hint">this collection is empty.</p>{% endif %}
+<ol class="items">
+{% for item in items %}
+<li>
+<span><span class="dim">{{ item.kind }}</span> <a href="{{ item.url }}">{{ item.title }}</a><br><span class="dim">{{ item.detail }}</span></span>
+{% if is_owner %}
+<form data-api-form data-method="DELETE" action="/api/collections/{{ collection.id }}/items">
+<input type="hidden" name="kind" value="{{ item.kind }}">
+<input type="hidden" name="core" value="{{ item.core }}">
+<button type="submit">remove</button>
+</form>
+{% endif %}
+</li>
+{% endfor %}
+</ol>
+<p class="hint">collection membership does not change an item's visibility, expiry, password, or burn-after-read behavior.</p>
+{% if is_owner %}
+<section>
+<h2>manage collection</h2>
+<form data-api-form data-method="PATCH" action="/api/collections/{{ collection.id }}">
+<label class="field">title
+<input type="text" name="title" maxlength="120" value="{{ collection.title }}" required>
+</label>
+<label class="field">description
+<textarea name="description" rows="4" maxlength="2000">{{ collection.description }}</textarea>
+</label>
+<label class="field">visibility
+<select name="visibility">
+<option value="unlisted" {% if collection.visibility == "unlisted" %}selected{% endif %}>unlisted</option>
+<option value="public" {% if collection.visibility == "public" %}selected{% endif %}>public</option>
+</select>
+</label>
+<button type="submit">save</button>
+</form>
+<form data-api-form data-method="POST" action="/api/collections/{{ collection.id }}/items">
+<label class="field">add item kind
+<select name="kind"><option value="file">file</option><option value="paste">paste</option></select>
+</label>
+<label class="field">file or paste core
+<input type="text" name="core" maxlength="64" required>
+</label>
+<button type="submit">add item</button>
+</form>
+<form data-api-form data-method="DELETE" data-success="/account" action="/api/collections/{{ collection.id }}">
+<button type="submit">delete collection</button>
+</form>
+<p class="hint" data-api-status role="status"></p>
+</section>
+{% endif %}
+<section data-comments data-target-kind="collection" data-target-core="{{ collection.id }}">
+<h2>comments</h2>
+<ol class="items" data-comment-list><li class="hint">loading comments…</li></ol>
+<p class="hint" data-comment-pages></p>
+{% match user %}
+{% when Some with (_) %}
+<form data-comment-form>
+<label class="field">add a comment
+<textarea name="body" rows="3" maxlength="2000" required></textarea>
+</label>
+<button type="submit">comment</button>
+</form>
+{% when None %}<p class="hint"><a href="/login">log in</a> to comment.</p>
+{% endmatch %}
+<p class="hint" data-comment-status role="status"></p>
+</section>
+{% endblock %}

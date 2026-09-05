@@ -1,0 +1,27 @@
+{% extends "layout.html" %}
+{% block title %}explore · {{ instance_name }}{% endblock %}
+{% block head %}
+<link rel="canonical" href="{{ canonical_url }}">
+<meta property="og:title" content="explore {{ instance_name }}">
+<meta property="og:description" content="recent public files and pastes">
+<meta property="og:type" content="website">
+<meta property="og:url" content="{{ canonical_url }}">
+{% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
+<meta name="twitter:card" content="summary">
+{% endblock %}
+{% block content %}
+<h1>explore</h1>
+<p class="hint">recent public files and pastes</p>
+{% if items.is_empty() %}<p>nothing public yet.</p>{% endif %}
+<ol class="items">
+{% for item in items %}
+<li>
+<span class="dim">{{ item.kind }}</span>
+<a href="{{ item.url }}">{{ item.title }}</a>
+<span class="dim">{{ item.detail }} · {{ item.created_human }}</span>
+</li>
+{% endfor %}
+</ol>
+{% if page > 1 %}<a href="/explore?page={{ page - 1 }}">← newer</a>{% endif %}
+{% if has_next %}<a href="/explore?page={{ page + 1 }}">older →</a>{% endif %}
+{% endblock %}

@@ -22,11 +22,9 @@ use crate::{
 };
 
 pub async fn list(pool: &PgPool) -> Result<Vec<InviteCode>, sqlx::Error> {
-    sqlx::query_as::<_, InviteCode>(
-        "SELECT * FROM invite_codes ORDER BY created_at DESC LIMIT 200",
-    )
-    .fetch_all(pool)
-    .await
+    sqlx::query_as::<_, InviteCode>("SELECT * FROM invite_codes ORDER BY created_at DESC LIMIT 200")
+        .fetch_all(pool)
+        .await
 }
 
 pub async fn create(
@@ -101,10 +99,7 @@ pub async fn create_user(
     Ok(user)
 }
 
-async fn redeem(
-    tx: &mut Transaction<'_, Postgres>,
-    code: &str,
-) -> Result<bool, sqlx::Error> {
+async fn redeem(tx: &mut Transaction<'_, Postgres>, code: &str) -> Result<bool, sqlx::Error> {
     let redeemed: Option<String> = sqlx::query_scalar(
         "UPDATE invite_codes SET uses=uses+1
          WHERE code=$1
@@ -192,7 +187,9 @@ pub async fn revoke_invite(
     Path(code): Path<String>,
 ) -> Result<Response, AppError> {
     let actor = super::admin::require_admin(&state, &session, &headers).await?;
-    let invite = revoke(&state.pool, &code).await?.ok_or(AppError::NotFound)?;
+    let invite = revoke(&state.pool, &code)
+        .await?
+        .ok_or(AppError::NotFound)?;
     db::audit(
         &state.pool,
         Some(&actor.id),

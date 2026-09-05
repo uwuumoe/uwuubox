@@ -22,8 +22,8 @@ impl Mailer {
     pub fn from_env(env: &Env) -> Option<Self> {
         let host = env.smtp_host.clone()?;
         let from = env.smtp_from.clone()?;
-        let mut builder =
-            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(host.as_str()).port(env.smtp_port);
+        let mut builder = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(host.as_str())
+            .port(env.smtp_port);
         builder = if env.smtp_starttls {
             match TlsParameters::new(host.clone()) {
                 Ok(tls) => builder.tls(Tls::Required(tls)),
@@ -49,13 +49,11 @@ impl Mailer {
             .from(self.from.parse().map_err(|e| format!("bad from: {e}"))?)
             .to(to.parse().map_err(|_| "bad recipient".to_string())?)
             .subject("uwuubox password reset")
-            .singlepart(
-                SinglePart::plain(format!(
-                    "Someone requested a password reset for your uwuubox account.\n\n\
+            .singlepart(SinglePart::plain(format!(
+                "Someone requested a password reset for your uwuubox account.\n\n\
                      Open this link within 1 hour to set a new password:\n{link}\n\n\
                      If that was not you, ignore this mail."
-                )),
-            )
+            )))
             .map_err(|e| format!("build mail: {e}"))?;
         self.transport
             .send(msg)

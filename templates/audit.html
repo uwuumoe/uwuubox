@@ -1,0 +1,29 @@
+{% extends "layout.html" %}
+{% block title %}audit log · {{ instance_name }}{% endblock %}
+{% block content %}
+<p><a href="/admin">← admin</a></p>
+<h1>audit log</h1>
+{% if entries.is_empty() %}
+<p class="hint">no audit entries on this page.</p>
+{% else %}
+<table>
+<thead><tr><th>time</th><th>actor</th><th>action</th><th>target</th><th>detail</th></tr></thead>
+<tbody>
+{% for entry in entries %}
+<tr>
+<td>{{ entry.created_at }}</td>
+<td>{% match entry.actor_name %}{% when Some with (name) %}{{ name }}{% when None %}system / deleted user{% endmatch %}</td>
+<td><code>{{ entry.action }}</code></td>
+<td>{% match entry.target_type %}{% when Some with (kind) %}<code>{{ kind }}</code>{% when None %}—{% endmatch %}{% match entry.target_id %}{% when Some with (id) %} · <code>{{ id }}</code>{% when None %}{% endmatch %}</td>
+<td>{% match entry.detail %}{% when Some with (detail) %}<code>{{ detail }}</code>{% when None %}—{% endmatch %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+<nav aria-label="audit pagination">
+{% if has_previous %}<a href="/admin/audit?page={{ previous_page }}">newer</a>{% endif %}
+<span>page {{ page }}</span>
+{% if has_next %}<a href="/admin/audit?page={{ next_page }}">older</a>{% endif %}
+</nav>
+{% endblock %}

@@ -308,7 +308,8 @@ impl InstanceConfig {
         cfg.allow_local_login = flag("allow_local_login", cfg.allow_local_login);
         cfg.allow_oidc = flag("allow_oidc", cfg.allow_oidc);
         cfg.scan_uploads = flag("scan_uploads", cfg.scan_uploads);
-        cfg.block_encrypted_archives = flag("block_encrypted_archives", cfg.block_encrypted_archives);
+        cfg.block_encrypted_archives =
+            flag("block_encrypted_archives", cfg.block_encrypted_archives);
         if !get("registration_mode").is_empty() {
             cfg.registration_mode = get("registration_mode").to_string();
         }
@@ -379,7 +380,10 @@ impl InstanceConfig {
             ("anonymous_max_bytes", self.anonymous_max_bytes.to_string()),
             ("registration_mode", self.registration_mode.clone()),
             ("scan_uploads", self.scan_uploads.to_string()),
-            ("block_encrypted_archives", self.block_encrypted_archives.to_string()),
+            (
+                "block_encrypted_archives",
+                self.block_encrypted_archives.to_string(),
+            ),
         ]
     }
 }

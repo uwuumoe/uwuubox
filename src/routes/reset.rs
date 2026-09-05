@@ -114,12 +114,11 @@ pub async fn forgot_post(
     };
 
     let email = form.email.trim().to_lowercase();
-    let account = sqlx::query_as::<_, (Uuid, String)>(
-        "SELECT id, email::text FROM users WHERE email = $1",
-    )
-    .bind(&email)
-    .fetch_optional(&state.pool)
-    .await?;
+    let account =
+        sqlx::query_as::<_, (Uuid, String)>("SELECT id, email::text FROM users WHERE email = $1")
+            .bind(&email)
+            .fetch_optional(&state.pool)
+            .await?;
 
     if let Some((user_id, destination)) = account {
         let raw = auth::new_reset_token();
@@ -134,10 +133,7 @@ pub async fn forgot_post(
         .execute(&state.pool)
         .await?;
 
-        let link = format!(
-            "{}/reset/{raw}",
-            state.env.base_url.trim_end_matches('/')
-        );
+        let link = format!("{}/reset/{raw}", state.env.base_url.trim_end_matches('/'));
         if let Err(error) = mailer.send_password_reset(&destination, &link).await {
             tracing::warn!(%error, "password-reset email delivery failed");
             if let Err(delete_error) =

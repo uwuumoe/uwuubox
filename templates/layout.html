@@ -7,6 +7,7 @@
 <meta property="og:site_name" content="{{ instance_name }}">
 {% if !icon_url.is_empty() %}<link rel="icon" href="{{ icon_url }}">{% endif %}
 <link rel="stylesheet" href="/static/app.css">
+<script src="/static/paste.js" defer></script>
 {% block head %}{% endblock %}
 </head>
 <body>
@@ -15,6 +16,7 @@
 {% if !tagline.is_empty() %}<span class="tagline">{{ tagline }}</span>{% endif %}
 <nav>
 <a href="/paste">paste</a>
+<a href="/explore">explore</a>
 {% match user %}
 {% when Some with (u) %}
 <a href="/account">{{ u.username }}</a>

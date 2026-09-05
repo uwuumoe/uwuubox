@@ -1,9 +1,12 @@
 {% extends "layout.html" %}
 {% block title %}{{ title }} · {{ instance_name }}{% endblock %}
 {% block head %}
+<link rel="canonical" href="{{ canonical_url }}">
+<link rel="alternate" type="application/json+oembed" href="{{ oembed_url }}" title="{{ title }}">
 <meta property="og:title" content="{{ title }}">
 <meta property="og:description" content="{{ desc }}">
-<meta property="og:type" content="website">
+<meta property="og:type" content="article">
+<meta property="og:url" content="{{ canonical_url }}">
 {% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
 <meta name="twitter:card" content="summary">
 <style>{{ highlight_css|safe }}
@@ -11,11 +14,15 @@
 .hl .line{counter-increment:line;display:block;min-height:1.2em}
 .hl .line::before{content:counter(line);display:inline-block;width:2.5em;margin-right:1em;text-align:right;opacity:.45;user-select:none}
 .hl pre{margin:0}
+.markdown-body{overflow-wrap:anywhere}
+.markdown-body table{border-collapse:collapse}
+.markdown-body th,.markdown-body td{border:1px solid var(--line);padding:.35rem .55rem}
 </style>
 {% endblock %}
 {% block content %}
 <h1 class="filename">{{ title }}</h1>
 <ul class="meta">
+<li>{{ format }}</li>
 <li>{{ language }}</li>
 <li>expires {{ expires_human }}</li>
 {% match owner_name %}
@@ -23,6 +30,40 @@
 {% when None %}<li>anonymous paste</li>
 {% endmatch %}
 </ul>
-<div class="hl"><pre><code>{{ highlighted|safe }}</code></pre></div>
+{% if is_owner %}<p class="hint">you own this paste — <a href="/account">manage it</a>.</p>{% endif %}
+{% if locked %}
+<p class="notice"><strong>password protected</strong> — unlock before viewing the content.</p>
+<form action="/p/{{ core }}/unlock" method="post">
+<label class="field">password
+<input type="password" name="password" minlength="8" maxlength="72" autocomplete="current-password" required>
+</label>
+<button type="submit">unlock</button>
+</form>
+{% else if burn_after_read %}
+<p class="notice"><strong>burn after read</strong> — the content is hidden here. Revealing it permanently removes this paste.</p>
+<p><a class="button" href="{{ raw_url }}">reveal once</a></p>
+{% else %}
+{% if is_markdown %}
+<article class="markdown-body">{{ content_html|safe }}</article>
+{% else %}
+<div class="hl"><pre><code>{{ content_html|safe }}</code></pre></div>
+{% endif %}
 <p><a class="button ghost" href="{{ raw_url }}">raw plaintext</a></p>
+{% endif %}
+<section data-comments data-target-kind="paste" data-target-core="{{ core }}">
+<h2>comments</h2>
+<ol class="items" data-comment-list><li class="hint">loading comments…</li></ol>
+<p class="hint" data-comment-pages></p>
+{% match user %}
+{% when Some with (_) %}
+<form data-comment-form>
+<label class="field">add a comment
+<textarea name="body" rows="3" maxlength="2000" required></textarea>
+</label>
+<button type="submit">comment</button>
+</form>
+{% when None %}<p class="hint"><a href="/login">log in</a> to comment.</p>
+{% endmatch %}
+<p class="hint" data-comment-status role="status"></p>
+</section>
 {% endblock %}

@@ -80,13 +80,6 @@ pub async fn get(pool: &PgPool, id: &Uuid) -> Result<Option<Role>, sqlx::Error> 
         .await
 }
 
-pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Role>, sqlx::Error> {
-    sqlx::query_as::<_, Role>("SELECT * FROM roles WHERE name = $1")
-        .bind(name)
-        .fetch_optional(pool)
-        .await
-}
-
 pub async fn create(pool: &PgPool, input: &RoleInput) -> Result<Role, AppError> {
     validate(input)?;
     let id = Uuid::now_v7();
@@ -117,11 +110,7 @@ pub async fn create(pool: &PgPool, input: &RoleInput) -> Result<Role, AppError> 
     .map_err(map_role_db_error)
 }
 
-pub async fn update(
-    pool: &PgPool,
-    id: &Uuid,
-    input: &RoleInput,
-) -> Result<Option<Role>, AppError> {
+pub async fn update(pool: &PgPool, id: &Uuid, input: &RoleInput) -> Result<Option<Role>, AppError> {
     validate(input)?;
     sqlx::query_as::<_, Role>(
         "UPDATE roles SET
@@ -166,16 +155,16 @@ pub async fn set_user_role(
     role_id: Option<&Uuid>,
     quota_override_bytes: Option<i64>,
 ) -> Result<bool, sqlx::Error> {
-    Ok(sqlx::query(
-        "UPDATE users SET role_id = $2, quota_override_bytes = $3 WHERE id = $1",
+    Ok(
+        sqlx::query("UPDATE users SET role_id = $2, quota_override_bytes = $3 WHERE id = $1")
+            .bind(user_id)
+            .bind(role_id)
+            .bind(quota_override_bytes)
+            .execute(pool)
+            .await?
+            .rows_affected()
+            == 1,
     )
-    .bind(user_id)
-    .bind(role_id)
-    .bind(quota_override_bytes)
-    .execute(pool)
-    .await?
-    .rows_affected()
-        == 1)
 }
 
 fn map_role_db_error(error: sqlx::Error) -> AppError {
@@ -313,10 +302,7 @@ impl RoleForm {
             max_avatar_bytes: optional_i64(self.max_avatar_bytes, "max_avatar_bytes")?,
             min_expiry_secs: optional_i64(self.min_expiry_secs, "min_expiry_secs")?,
             max_expiry_secs: optional_i64(self.max_expiry_secs, "max_expiry_secs")?,
-            default_expiry_secs: optional_i64(
-                self.default_expiry_secs,
-                "default_expiry_secs",
-            )?,
+            default_expiry_secs: optional_i64(self.default_expiry_secs, "default_expiry_secs")?,
             quota_bytes: optional_i64(self.quota_bytes, "quota_bytes")?,
             can_publish_public: self.can_publish_public.is_some(),
             can_burn: self.can_burn.is_some(),
@@ -405,7 +391,12 @@ pub async fn update_user_role(
     Form(form): Form<UserRoleForm>,
 ) -> Result<Response, AppError> {
     let actor = super::admin::require_admin(&state, &session, &headers).await?;
-    let role_id = match form.role_id.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    let role_id = match form
+        .role_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         Some(value) => Some(
             value
                 .parse::<Uuid>()
@@ -515,10 +506,21 @@ mod tests {
 
     #[test]
     fn role_names_enforce_public_contract() {
-        for valid in ["abc", "uploaders", "oidc-admin_2", "a2345678901234567890123456789012"] {
+        for valid in [
+            "abc",
+            "uploaders",
+            "oidc-admin_2",
+            "a2345678901234567890123456789012",
+        ] {
             assert!(validate_name(valid).is_ok(), "{valid}");
         }
-        for invalid in ["ab", "a23456789012345678901234567890123", "Admin", "has space", "olé"] {
+        for invalid in [
+            "ab",
+            "a23456789012345678901234567890123",
+            "Admin",
+            "has space",
+            "olé",
+        ] {
             assert!(validate_name(invalid).is_err(), "{invalid}");
         }
     }

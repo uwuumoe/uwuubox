@@ -155,11 +155,9 @@ pub async fn register_post(
             "register",
             "invite code is invalid, expired, or fully used",
         ),
-        Err(InviteRegistrationError::Database(e)) if is_unique_violation(&e) => login_error_page(
-            &cfg,
-            "register",
-            "username or email is already in use",
-        ),
+        Err(InviteRegistrationError::Database(e)) if is_unique_violation(&e) => {
+            login_error_page(&cfg, "register", "username or email is already in use")
+        }
         Err(InviteRegistrationError::Database(e)) => Err(AppError::from(e)),
     }
 }
@@ -329,25 +327,19 @@ pub async fn update_profile(
     if bio.as_ref().is_some_and(|s| s.len() > 500) {
         return Err(AppError::bad_request("bio must be <= 500 chars"));
     }
-    let updated = sqlx::query(
-        "UPDATE users SET display_name = $1, bio = $2, email = $3 WHERE id = $4",
-    )
-    .bind(name.as_deref())
-    .bind(bio.as_deref())
-    .bind(email.as_deref())
-    .bind(user.id)
-    .execute(&state.pool)
-    .await;
+    let updated =
+        sqlx::query("UPDATE users SET display_name = $1, bio = $2, email = $3 WHERE id = $4")
+            .bind(name.as_deref())
+            .bind(bio.as_deref())
+            .bind(email.as_deref())
+            .bind(user.id)
+            .execute(&state.pool)
+            .await;
     match updated {
         Ok(_) => {}
         Err(error) if is_unique_violation(&error) => {
-            return dashboard_response(
-                &state,
-                &user,
-                None,
-                Some("email is already in use".into()),
-            )
-            .await;
+            return dashboard_response(&state, &user, None, Some("email is already in use".into()))
+                .await;
         }
         Err(error) => return Err(AppError::from(error)),
     }
@@ -376,6 +368,9 @@ pub async fn upload_avatar(
         return Err(AppError::Unauthorized);
     };
     let cfg = db::instance_config(&state.pool).await?;
+    let max_avatar_bytes = db::effective_limits(&state.pool, &cfg, Some(&user))
+        .await?
+        .max_avatar_bytes;
     let mut data: Option<Vec<u8>> = None;
     while let Some(field) = multipart
         .next_field()
@@ -395,9 +390,9 @@ pub async fn upload_avatar(
     let Some(data) = data else {
         return Err(AppError::bad_request("missing avatar field"));
     };
-    if data.len() as i64 > cfg.max_avatar_bytes {
+    if data.len() as i64 > max_avatar_bytes {
         return Err(AppError::TooLarge {
-            max_bytes: cfg.max_avatar_bytes,
+            max_bytes: max_avatar_bytes,
         });
     }
     // Re-validate sniffed bytes; spoofed extensions never reach the store.
@@ -666,6 +661,7 @@ pub async fn profile(
     let has_next = files.len() > 20 || pastes.len() > 20;
     files.truncate(20);
     pastes.truncate(20);
+    let collections = crate::routes::collections::public_for_owner(&state.pool, profile.id).await?;
     let page_view = crate::views::ProfilePage {
         instance_name: cfg.instance_name,
         tagline: cfg.tagline,
@@ -674,6 +670,7 @@ pub async fn profile(
         avatar_url: avatar_url(profile.avatar_key.as_deref()),
         files,
         pastes,
+        collections,
         page,
         has_next,
         profile,

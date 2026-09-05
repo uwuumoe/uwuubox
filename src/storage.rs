@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
 use std::path::PathBuf;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use thiserror::Error;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use uuid::Uuid;
 
 use crate::config::Env;
@@ -128,7 +128,6 @@ impl ObjectStore for LocalStore {
         Ok(Bytes::from(bytes))
     }
 
-
     async fn delete(&self, key: &str) -> Result<(), StorageError> {
         assert_safe_key(key);
         match tokio::fs::remove_file(self.root.join(key)).await {
@@ -226,7 +225,6 @@ impl ObjectStore for S3Store {
         Ok(bytes)
     }
 
-
     async fn delete(&self, key: &str) -> Result<(), StorageError> {
         assert_safe_key(key);
         self.client
@@ -294,18 +292,12 @@ impl Store {
             Self::S3(s) => s.get(key).await,
         }
     }
-    pub async fn get_range(
-        &self,
-        key: &str,
-        offset: u64,
-        len: u64,
-    ) -> Result<Bytes, StorageError> {
+    pub async fn get_range(&self, key: &str, offset: u64, len: u64) -> Result<Bytes, StorageError> {
         match self {
             Self::Local(s) => s.get_range(key, offset, len).await,
             Self::S3(s) => s.get_range(key, offset, len).await,
         }
     }
-
 
     pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
         match self {

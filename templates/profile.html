@@ -38,6 +38,13 @@
 <li><a href="/p/{{ p.id_core }}">{% match p.title %}{% when Some with (t) %}{{ t }}{% when None %}paste {{ p.id_core }}{% endmatch %}</a></li>
 {% endfor %}
 </ul>
+<h2>collections</h2>
+{% if collections.is_empty() %}<p class="hint">nothing public yet.</p>{% endif %}
+<ul class="items">
+{% for c in collections %}
+<li><a href="/c/{{ c.id }}">{{ c.title }}</a></li>
+{% endfor %}
+</ul>
 {% if page > 1 %}<a href="/u/{{ profile.username }}?page={{ page - 1 }}">← newer</a>{% endif %}
 {% if has_next %}<a href="/u/{{ profile.username }}?page={{ page + 1 }}">older →</a>{% endif %}
 {% endblock %}

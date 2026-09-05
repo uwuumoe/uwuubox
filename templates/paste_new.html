@@ -6,7 +6,13 @@
 <label class="field">title (optional)
 <input type="text" name="title" maxlength="140">
 </label>
-<label class="field">language (optional, auto-detected)
+<label class="field">format
+<select name="format">
+<option value="code" selected>code</option>
+<option value="markdown">markdown</option>
+</select>
+</label>
+<label class="field">language (optional, auto-detected for code)
 <input type="text" name="language" maxlength="32" placeholder="rs, py, js …">
 </label>
 <label class="field">body (max {{ max_paste_bytes }} bytes)
@@ -21,9 +27,11 @@
 {% if max_expiry_secs >= 2592000 %}<option value="2592000">30 days</option>{% endif %}
 </select>
 </label>
-{% if authed %}
-<label class="field inline"><input type="checkbox" name="visibility" value="public"> list on my public profile</label>
-{% endif %}
+<label class="field">access password (optional, 8–72 characters)
+<input type="password" name="access_password" minlength="8" maxlength="72" autocomplete="new-password">
+</label>
+<label class="field inline"><input type="checkbox" name="burn_after_read" value="true"> burn after the first raw read</label>
+<label class="field inline"><input type="checkbox" name="visibility" value="public"> list publicly</label>
 <button type="submit">publish</button>
 </form>
 {% endblock %}

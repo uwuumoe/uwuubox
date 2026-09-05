@@ -11,8 +11,8 @@ mod mail;
 mod metrics;
 mod mime;
 mod oidc;
-mod ratelimit;
 mod range;
+mod ratelimit;
 mod routes;
 mod scan;
 mod state;
@@ -38,8 +38,14 @@ fn fatal(context: &str, err: impl std::fmt::Display) -> ! {
 /// does not parse; passkeys stay disabled but boot continues.
 fn build_webauthn(env: &crate::config::Env) -> Option<std::sync::Arc<webauthn_rs::Webauthn>> {
     let origin = url::Url::parse(&env.base_url).ok()?;
-    let rp_id = origin.host_str()?.to_string();
-    let wan = webauthn_rs::WebauthnBuilder::new(&rp_id, &origin)
+    // webauthn-rs checks rp_id against origin.domain(), which is None for
+    // bare IPs: passkeys need a hostname BASE_URL (`localhost` works).
+    let domain = origin.domain()?;
+    if origin.host_str() != Some(domain) {
+        tracing::warn!("passkeys disabled: BASE_URL host must be a bare domain for WebAuthn");
+        return None;
+    }
+    let wan = webauthn_rs::WebauthnBuilder::new(domain, &origin)
         .ok()?
         .rp_name("uwuubox")
         .build()

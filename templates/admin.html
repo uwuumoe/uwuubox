@@ -134,4 +134,19 @@
 </li>
 {% endfor %}
 </ul>
+
+<h1>operations</h1>
+<p><a href="/admin/audit">view audit log</a></p>
+<section>
+<h2>garbage collection</h2>
+<p class="hint">Start with a dry run. Reclaim scans again and deletes only keys that are still unreferenced.</p>
+<form method="post" action="/admin/gc">
+<input type="hidden" name="dry_run" value="true">
+<button type="submit">run GC dry run</button>
+</form>
+<form method="post" action="/admin/gc" onsubmit="return confirm('Delete unreferenced stored objects?')">
+<input type="hidden" name="dry_run" value="false">
+<button type="submit">scan and reclaim</button>
+</form>
+</section>
 {% endblock %}

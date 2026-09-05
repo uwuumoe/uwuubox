@@ -156,21 +156,6 @@ pub async fn set_admin(pool: &PgPool, id: &Uuid, admin: bool) -> Result<(), sqlx
     Ok(())
 }
 
-pub async fn update_profile(
-    pool: &PgPool,
-    id: &Uuid,
-    display_name: Option<&str>,
-    bio: Option<&str>,
-) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE users SET display_name = $1, bio = $2 WHERE id = $3")
-        .bind(display_name)
-        .bind(bio)
-        .bind(id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
 pub async fn set_avatar_key(
     pool: &PgPool,
     id: &Uuid,
@@ -182,15 +167,6 @@ pub async fn set_avatar_key(
         .execute(pool)
         .await?;
     Ok(())
-}
-
-pub async fn find_user_by_token(pool: &PgPool, hash: &str) -> Result<Option<User>, sqlx::Error> {
-    sqlx::query_as::<_, User>(
-        "SELECT u.* FROM users u JOIN api_tokens t ON t.user_id = u.id WHERE t.token_hash = $1",
-    )
-    .bind(hash)
-    .fetch_optional(pool)
-    .await
 }
 
 pub async fn touch_token(pool: &PgPool, hash: &str) -> Result<(), sqlx::Error> {
@@ -380,7 +356,6 @@ pub struct Role {
     pub can_comment: bool,
     pub can_create_collections: bool,
     pub can_moderate: bool,
-    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -395,12 +370,9 @@ pub struct Collection {
 
 #[derive(Debug, Clone, FromRow)]
 pub struct CollectionItem {
-    pub collection_id: Uuid,
     pub kind: String,
     pub core: String,
-    pub position: i64,
 }
-
 #[derive(Debug, Clone, FromRow)]
 pub struct CommentRow {
     pub id: i64,
@@ -415,17 +387,13 @@ pub struct CommentRow {
 #[derive(Debug, Clone, FromRow)]
 pub struct InviteCode {
     pub code: String,
-    pub created_by: Option<Uuid>,
     pub max_uses: Option<i32>,
     pub uses: i32,
     pub expires_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, FromRow)]
 pub struct AuditEntry {
-    pub id: i64,
-    pub actor_id: Option<Uuid>,
     pub actor_name: Option<String>,
     pub action: String,
     pub target_type: Option<String>,
@@ -470,8 +438,14 @@ pub async fn effective_limits(
     };
     let pick = |r: Option<i64>, d: i64| r.unwrap_or(d);
     Ok(EffectiveLimits {
-        max_file_bytes: pick(role.as_ref().and_then(|r| r.max_file_bytes), cfg.max_file_bytes),
-        max_paste_bytes: pick(role.as_ref().and_then(|r| r.max_paste_bytes), cfg.max_paste_bytes),
+        max_file_bytes: pick(
+            role.as_ref().and_then(|r| r.max_file_bytes),
+            cfg.max_file_bytes,
+        ),
+        max_paste_bytes: pick(
+            role.as_ref().and_then(|r| r.max_paste_bytes),
+            cfg.max_paste_bytes,
+        ),
         max_avatar_bytes: pick(
             role.as_ref().and_then(|r| r.max_avatar_bytes),
             cfg.max_avatar_bytes,
@@ -504,11 +478,12 @@ pub async fn effective_limits(
 
 /// Logical bytes owned by a user (deduped files count once per link).
 pub async fn storage_used(pool: &PgPool, user_id: &Uuid) -> Result<i64, sqlx::Error> {
-    let files: Option<i64> =
-        sqlx::query_scalar("SELECT COALESCE(SUM(size_bytes), 0)::bigint FROM files WHERE owner_id = $1")
-            .bind(user_id)
-            .fetch_one(pool)
-            .await?;
+    let files: Option<i64> = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(size_bytes), 0)::bigint FROM files WHERE owner_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
     Ok(files.unwrap_or(0))
 }
 
