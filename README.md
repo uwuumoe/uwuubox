@@ -141,9 +141,7 @@ ShareX custom uploader (`DestinationType: ImageUploader, FileUploader`):
 
 ## Non-goals (will not be added)
 
-tus/resumable uploads, raw-PUT uploads, multiple OIDC
-providers, custom slugs, permanent keeps, image resizing,
-root-compat shims for other services, federation.
+tus/resumable uploads, custom slugs, compat shims for other services, federation.
 
 ## Backup & restore
 
