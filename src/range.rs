@@ -99,6 +99,40 @@ pub fn response(outcome: RangeOutcome, full_len: u64, body: Bytes) -> Response<B
     .expect("static range response headers are valid")
 }
 
+/// Streaming variant of [`response`]: headers identical, body prebuilt
+/// (typically `Body::from_stream`). `content_len` is the exact plaintext
+/// length served (DB-authoritative for full bodies, `end - start + 1` for
+/// ranges), so players still see `Content-Length` on 206s and most 200s.
+pub fn response_stream(
+    outcome: RangeOutcome,
+    full_len: u64,
+    content_len: u64,
+    body: Body,
+) -> Response<Body> {
+    let builder = Response::builder().header(ACCEPT_RANGES, "bytes");
+    match outcome {
+        RangeOutcome::Full => builder
+            .status(StatusCode::OK)
+            .header(CONTENT_LENGTH, content_len)
+            .body(body),
+        RangeOutcome::Satisfiable { start, end } => builder
+            .status(StatusCode::PARTIAL_CONTENT)
+            .header(CONTENT_RANGE, format!("bytes {start}-{end}/{full_len}"))
+            .header(CONTENT_LENGTH, content_len)
+            .body(body),
+        RangeOutcome::Invalid => builder
+            .status(StatusCode::BAD_REQUEST)
+            .header(CONTENT_LENGTH, 0)
+            .body(Body::empty()),
+        RangeOutcome::Unsatisfiable => builder
+            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+            .header(CONTENT_RANGE, format!("bytes */{full_len}"))
+            .header(CONTENT_LENGTH, 0)
+            .body(Body::empty()),
+    }
+    .expect("static range response headers are valid")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{parse, RangeOutcome};

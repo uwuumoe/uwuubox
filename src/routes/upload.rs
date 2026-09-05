@@ -1,7 +1,7 @@
 //! `POST /api/upload`: streamed multipart uploads, per-role caps, content
 //! processing, deduplicated object storage, and delete-token issue.
 
-use std::{io::Cursor, net::SocketAddr};
+use std::net::SocketAddr;
 
 use axum::{
     extract::{ConnectInfo, Multipart, State},
@@ -106,7 +106,7 @@ async fn upload_inner(
         .unwrap_or(role_cap);
 
     let mut filename: Option<String> = None;
-    let mut bytes: Option<Vec<u8>> = None;
+    let mut spooled: Option<SpooledUpload> = None;
     let mut expires_raw: Option<String> = None;
     let mut visibility_raw: Option<String> = None;
     let mut burn_raw: Option<String> = None;
@@ -119,23 +119,12 @@ async fn upload_inner(
         match field.name().unwrap_or("") {
             "file" => {
                 filename = Some(field.file_name().unwrap_or("upload").to_string());
-                let mut data = Vec::new();
-                while let Some(chunk) = field.chunk().await.map_err(|error| {
-                    tracing::warn!(error = ?error, "multipart field read failed");
-                    AppError::bad_request(format!("unreadable file field: {error}"))
-                })? {
-                    let current = i64::try_from(data.len())
-                        .map_err(|_| AppError::internal("upload length overflow"))?;
-                    let incoming = i64::try_from(chunk.len())
-                        .map_err(|_| AppError::internal("upload length overflow"))?;
-                    if incoming > stream_cap.saturating_sub(current) {
-                        return Err(AppError::TooLarge {
-                            max_bytes: stream_cap,
-                        });
-                    }
-                    data.extend_from_slice(&chunk);
-                }
-                bytes = Some(data);
+                // Stream straight to a 0600 temp file: RAM stays flat no
+                // matter how large the upload is (fixes OOMKilled 502s).
+                let upload = spool_file_field(&mut field, stream_cap).await?;
+                // Last field wins, as before; dropping the previous spool
+                // deletes its temp file.
+                spooled = Some(upload);
             }
             "expires_in_secs" => {
                 expires_raw = Some(field.text().await.map_err(|error| {
@@ -169,28 +158,42 @@ async fn upload_inner(
     }
 
     let filename = filename.unwrap_or_else(|| "upload".into());
-    let raw_bytes = bytes.ok_or_else(|| AppError::bad_request("missing file field"))?;
-    if raw_bytes.is_empty() {
+    let mut spooled = spooled.ok_or_else(|| AppError::bad_request("missing file field"))?;
+    if spooled.size == 0 {
         return Err(AppError::bad_request("empty file"));
     }
 
     let strip_default = user.map(|user| user.strip_exif_default).unwrap_or(false);
     let strip_exif = parse_bool_field(strip_exif_raw.as_deref(), strip_default, "strip_exif")?;
-    let (bytes, exif_stripped) = if strip_exif {
-        strip_image_metadata(Bytes::from(raw_bytes))?
-    } else {
-        (Bytes::from(raw_bytes), false)
-    };
-    if bytes.is_empty() {
-        return Err(AppError::bad_request("empty file"));
+    // EXIF stripping parses the whole image, so it stays an in-memory step:
+    // only for strippable image types, and capped. Anything else skips it
+    // exactly as the old no-op parse did, without loading the file.
+    let mut prefix = read_prefix(&spooled.path, SNIFF_PREFIX).await?;
+    let mut exif_stripped = false;
+    if strip_exif && is_strippable_image(mime::sniff_mime(&prefix).as_str()) {
+        if spooled.size > STRIP_MAX_BYTES {
+            return Err(AppError::bad_request(
+                "image is too large for metadata stripping; retry with it disabled",
+            ));
+        }
+        let raw = tokio::fs::read(&spooled.path)
+            .await
+            .map_err(|e| AppError::internal(e.to_string()))?;
+        let (stripped, changed) = strip_image_metadata(Bytes::from(raw))?;
+        exif_stripped = changed;
+        tokio::fs::write(&spooled.path, &stripped)
+            .await
+            .map_err(|e| AppError::internal(e.to_string()))?;
+        spooled.size = stripped.len() as u64;
+        prefix = stripped.slice(..stripped.len().min(SNIFF_PREFIX));
     }
 
-    let sniffed = mime::sniff_mime(&bytes);
+    let sniffed = mime::sniff_mime(&prefix);
     if mime::is_upload_blocked(&sniffed) {
         return Err(AppError::UnsupportedMedia { mime: sniffed });
     }
     if cfg.block_encrypted_archives && sniffed == "application/zip" {
-        match zip_has_encrypted_entry(&bytes) {
+        match zip_has_encrypted_entry_path(&spooled.path).await {
             Ok(true) => {
                 return Err(AppError::UnsupportedMedia {
                     mime: "encrypted application/zip".into(),
@@ -245,7 +248,7 @@ async fn upload_inner(
     let expires_at = Utc::now() + chrono::TimeDelta::seconds(secs);
 
     let scan_status = if cfg.scan_uploads {
-        match scan::verdict(&state.env, &filename, &bytes, &sniffed).await {
+        match scan::verdict_path(&state.env, &filename, &spooled.path, &sniffed).await {
             Verdict::Clean => "clean",
             Verdict::Skipped => "skipped",
             Verdict::Infected(reason) => return Err(AppError::Unprocessable(reason)),
@@ -255,7 +258,8 @@ async fn upload_inner(
     };
 
     // Content processing is complete: this digest is the dedupe identity.
-    let digest = Sha256::digest(&bytes).to_vec();
+    // Hashed back off disk so RAM stays flat for multi-GB files.
+    let digest = hash_spooled_file(&spooled.path).await?;
 
     // PK-retry for the 8-char core (2^40 space; 5 tries then 500).
     let mut core = String::new();
@@ -273,11 +277,15 @@ async fn upload_inner(
     let ext = ids::normalize_ext(&filename);
     let candidate_key = file_key(&core, &ext);
     let size_bytes =
-        i64::try_from(bytes.len()).map_err(|_| AppError::internal("upload length overflow"))?;
+        i64::try_from(spooled.size).map_err(|_| AppError::internal("upload length overflow"))?;
     let (storage_key, is_new) =
         db::acquire_object(&state.pool, &digest, &candidate_key, size_bytes, &sniffed).await?;
     if is_new {
-        if let Err(error) = state.store.put(&storage_key, bytes.clone(), &sniffed).await {
+        if let Err(error) = state
+            .store
+            .put_file(&storage_key, &spooled.path, spooled.size, &sniffed)
+            .await
+        {
             rollback_object(&state, &storage_key).await;
             return Err(AppError::from(error));
         }
@@ -315,7 +323,7 @@ async fn upload_inner(
 
     info!(
         core = %core,
-        size = bytes.len(),
+        size = spooled.size,
         mime = %sniffed,
         user = user.map(|user| user.username.as_str()).unwrap_or("-"),
         "upload stored"
@@ -336,7 +344,7 @@ async fn upload_inner(
         }))
         .into_response()
     };
-    Ok((response, bytes.len() as u64))
+    Ok((response, spooled.size))
 }
 
 fn parse_bool_field(raw: Option<&str>, default: bool, field: &str) -> Result<bool, AppError> {
@@ -346,6 +354,105 @@ fn parse_bool_field(raw: Option<&str>, default: bool, field: &str) -> Result<boo
         Some("0" | "false" | "no" | "off") => Ok(false),
         Some(_) => Err(AppError::bad_request(format!("{field} must be a boolean"))),
     }
+}
+
+/// Bytes of the spooled file sniffed for the MIME type.
+const SNIFF_PREFIX: usize = 32 * 1024;
+/// EXIF stripping parses the whole image: refuse it above this instead of
+/// OOMing. Non-image uploads never reach the strip step.
+const STRIP_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+/// An upload body spooled to a 0600 temp file. Dropping deletes the file, so
+/// every early return cleans up; the success path falls out of scope too.
+struct SpooledUpload {
+    path: std::path::PathBuf,
+    size: u64,
+}
+
+impl Drop for SpooledUpload {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// Stream one multipart file field to a temp file, enforcing `cap` mid-stream
+/// so oversize bodies 413 without ever residing in RAM.
+async fn spool_file_field(
+    field: &mut axum::extract::multipart::Field<'_>,
+    cap: i64,
+) -> Result<SpooledUpload, AppError> {
+    let path = std::env::temp_dir().join(format!(
+        "uwuubox-up-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4().as_simple()
+    ));
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options
+        .open(&path)
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))?;
+    let mut size: u64 = 0;
+    let cap = u64::try_from(cap.max(0)).unwrap_or(0);
+    while let Some(chunk) = field.chunk().await.map_err(|error| {
+        tracing::warn!(error = ?error, "multipart field read failed");
+        AppError::bad_request(format!("unreadable file field: {error}"))
+    })? {
+        let incoming = chunk.len() as u64;
+        if incoming > cap.saturating_sub(size) {
+            return Err(AppError::TooLarge { max_bytes: cap as i64 });
+        }
+        tokio::io::AsyncWriteExt::write_all(&mut file, &chunk)
+            .await
+            .map_err(|e| AppError::internal(e.to_string()))?;
+        size += incoming;
+    }
+    Ok(SpooledUpload { path, size })
+}
+
+/// First `n` bytes of a spooled file (empty when the file is empty).
+async fn read_prefix(path: &std::path::Path, n: usize) -> Result<Bytes, AppError> {
+    use tokio::io::AsyncReadExt;
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))?;
+    let mut buf = vec![0u8; n];
+    let mut filled = 0;
+    while filled < buf.len() {
+        match file.read(&mut buf[filled..]).await {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(e) => return Err(AppError::internal(e.to_string())),
+        }
+    }
+    buf.truncate(filled);
+    Ok(Bytes::from(buf))
+}
+
+/// SHA-256 over a spooled file in 8 MiB reads.
+async fn hash_spooled_file(path: &std::path::Path) -> Result<Vec<u8>, AppError> {
+    use tokio::io::AsyncReadExt;
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 8 * 1024 * 1024];
+    loop {
+        match file.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => hasher.update(&buf[..n]),
+            Err(e) => return Err(AppError::internal(e.to_string())),
+        }
+    }
+    Ok(hasher.finalize().to_vec())
+}
+
+/// `img_parts` only understands these containers (see the `DynImage` arms in
+/// [`strip_image_metadata`]); anything else skips the strip step untouched.
+fn is_strippable_image(sniffed: &str) -> bool {
+    matches!(sniffed, "image/jpeg" | "image/png" | "image/webp")
 }
 
 fn strip_image_metadata(bytes: Bytes) -> Result<(Bytes, bool), AppError> {
@@ -400,14 +507,28 @@ fn strip_image_metadata(bytes: Bytes) -> Result<(Bytes, bool), AppError> {
     }
 }
 
-fn zip_has_encrypted_entry(bytes: &[u8]) -> Result<bool, zip::result::ZipError> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
-    for index in 0..archive.len() {
-        if archive.by_index_raw(index)?.encrypted() {
-            return Ok(true);
+/// True when any zip entry carries the encryption bit. Reads the spooled
+/// file with positional I/O on a blocking thread: only the central
+/// directory is touched, never the whole archive.
+async fn zip_has_encrypted_entry_path(path: &std::path::Path) -> Result<bool, AppError> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || -> Result<bool, String> {
+        let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+        let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+        for index in 0..archive.len() {
+            if archive
+                .by_index_raw(index)
+                .map_err(|e| e.to_string())?
+                .encrypted()
+            {
+                return Ok(true);
+            }
         }
-    }
-    Ok(false)
+        Ok(false)
+    })
+    .await
+    .map_err(|e| AppError::internal(e.to_string()))?
+    .map_err(AppError::bad_request)
 }
 
 async fn rollback_object(state: &AppState, storage_key: &str) {
@@ -430,7 +551,7 @@ mod tests {
 
     use zip::{write::SimpleFileOptions, AesMode, CompressionMethod, ZipWriter};
 
-    use super::zip_has_encrypted_entry;
+    use super::zip_has_encrypted_entry_path;
 
     fn archive(options: SimpleFileOptions) -> Vec<u8> {
         let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
@@ -439,17 +560,31 @@ mod tests {
         writer.finish().unwrap().into_inner()
     }
 
-    #[test]
-    fn encrypted_zip_detector_reads_entry_flags() {
+    fn spool(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "uwuubox-test-{name}-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().as_simple()
+        ));
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[tokio::test]
+    async fn encrypted_zip_detector_reads_entry_flags() {
         let plain =
             archive(SimpleFileOptions::default().compression_method(CompressionMethod::Stored));
-        assert!(!zip_has_encrypted_entry(&plain).unwrap());
+        let plain_path = spool("plain", &plain);
+        assert!(!zip_has_encrypted_entry_path(&plain_path).await.unwrap());
+        std::fs::remove_file(&plain_path).unwrap();
 
         let encrypted = archive(
             SimpleFileOptions::default()
                 .compression_method(CompressionMethod::Stored)
                 .with_aes_encryption(AesMode::Aes256, "password"),
         );
-        assert!(zip_has_encrypted_entry(&encrypted).unwrap());
+        let encrypted_path = spool("encrypted", &encrypted);
+        assert!(zip_has_encrypted_entry_path(&encrypted_path).await.unwrap());
+        std::fs::remove_file(&encrypted_path).unwrap();
     }
 }

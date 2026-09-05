@@ -4,6 +4,7 @@
 //! canonical link always uses the stored ext).
 
 use axum::{
+    body::Body,
     extract::{Form, Path, Query, State},
     http::{header::*, HeaderMap, StatusCode},
     response::{IntoResponse, Json, Response},
@@ -60,12 +61,7 @@ async fn is_unlocked(session: &Session, file: &FileRow) -> bool {
         .unwrap_or(false)
 }
 
-fn raw_response(
-    file: &FileRow,
-    outcome: RangeOutcome,
-    full_len: u64,
-    bytes: Bytes,
-) -> Result<Response, AppError> {
+fn download_headers(file: &FileRow, headers: &mut HeaderMap) -> Result<(), AppError> {
     // text/plain is only persisted when the complete upload was valid UTF-8,
     // so a ranged slice splitting a multibyte character remains safe to serve.
     let inline = mime::should_inline(&file.mime_stored, &[]);
@@ -78,8 +74,6 @@ fn raw_response(
         .parse()
         .map_err(|_| AppError::internal("bad stored mime"))?;
 
-    let mut response = range::response(outcome, full_len, bytes);
-    let headers = response.headers_mut();
     headers.insert(CONTENT_TYPE, content_type);
     headers.insert("X-Content-Type-Options", "nosniff".parse().unwrap());
     headers.insert("Content-Security-Policy", "sandbox".parse().unwrap());
@@ -100,7 +94,44 @@ fn raw_response(
             .map_err(|_| AppError::internal("bad filename"))?;
         headers.insert(CONTENT_DISPOSITION, disp);
     }
+    Ok(())
+}
+
+fn raw_response(
+    file: &FileRow,
+    outcome: RangeOutcome,
+    full_len: u64,
+    bytes: Bytes,
+) -> Result<Response, AppError> {
+    let mut response = range::response(outcome, full_len, bytes);
+    download_headers(file, response.headers_mut())?;
     Ok(response)
+}
+
+fn raw_response_stream(
+    file: &FileRow,
+    outcome: RangeOutcome,
+    full_len: u64,
+    content_len: u64,
+    body: Body,
+) -> Result<Response, AppError> {
+    let mut response = range::response_stream(outcome, full_len, content_len, body);
+    download_headers(file, response.headers_mut())?;
+    Ok(response)
+}
+
+/// Collect a storage stream (burn-after-read and other all-or-nothing paths).
+/// Mid-stream storage failures become 500s, as before with buffered reads.
+async fn collect_stream(
+    mut stream: crate::storage::ObjectDataStream,
+) -> Result<Vec<u8>, AppError> {
+    use tokio_stream::StreamExt;
+    let mut out = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(AppError::from)?;
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
 }
 
 pub async fn preview(
@@ -218,9 +249,16 @@ pub async fn raw(
     }
 
     if file.burn_after_read {
-        // Fetch first so a transient storage failure does not consume the
+        // Collect first so a transient storage failure does not consume the
         // one successful read. The following DELETE is the atomic winner.
-        let all = state.store.get(&file.storage_key).await?;
+        // Same RAM as before; burn files are not the streaming target.
+        let all = collect_stream(
+            state
+                .store
+                .get_stream(&file.storage_key, full_len)
+                .await?,
+        )
+        .await?;
         if all.len() as u64 != full_len {
             return Err(AppError::internal("stored object size mismatch"));
         }
@@ -228,30 +266,38 @@ pub async fn raw(
             return Err(AppError::NotFound);
         }
         let body = match outcome {
-            RangeOutcome::Full => all,
+            RangeOutcome::Full => Bytes::from(all),
             RangeOutcome::Satisfiable { start, end } => {
                 let start = usize::try_from(start)
                     .map_err(|_| AppError::internal("range offset is too large"))?;
                 let end = usize::try_from(end + 1)
                     .map_err(|_| AppError::internal("range offset is too large"))?;
-                all.slice(start..end)
+                Bytes::from(all).slice(start..end)
             }
             RangeOutcome::Invalid | RangeOutcome::Unsatisfiable => unreachable!(),
         };
         return raw_response(&file, outcome, full_len, body);
     }
 
-    let body = match outcome {
-        RangeOutcome::Full => state.store.get(&file.storage_key).await?,
-        RangeOutcome::Satisfiable { start, end } => {
-            state
+    let (content_len, body) = match outcome {
+        RangeOutcome::Full => {
+            let stream = state
                 .store
-                .get_range(&file.storage_key, start, end - start + 1)
-                .await?
+                .get_stream(&file.storage_key, full_len)
+                .await?;
+            (full_len, Body::from_stream(stream))
+        }
+        RangeOutcome::Satisfiable { start, end } => {
+            let len = end - start + 1;
+            let stream = state
+                .store
+                .get_range_stream(&file.storage_key, start, len)
+                .await?;
+            (len, Body::from_stream(stream))
         }
         RangeOutcome::Invalid | RangeOutcome::Unsatisfiable => unreachable!(),
     };
-    raw_response(&file, outcome, full_len, body)
+    raw_response_stream(&file, outcome, full_len, content_len, body)
 }
 
 #[derive(Deserialize)]

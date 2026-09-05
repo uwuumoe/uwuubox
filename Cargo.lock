@@ -4818,6 +4818,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -5242,9 +5243,9 @@ dependencies = [
  "chacha20poly1305",
  "chrono",
  "dotenvy",
+ "futures-core",
  "hex",
  "http-body 1.1.0",
- "http-body-util",
  "img-parts",
  "infer",
  "lettre",
@@ -5266,6 +5267,7 @@ dependencies = [
  "syntect",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-stream",
  "tower",
  "tower-http",
  "tower-sessions",
