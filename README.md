@@ -44,6 +44,7 @@ limits, and toggles live in the `instance_config` table and are edited at
 | `UWUU_S3_REGION` | no | `auto` | for R2 set the account region + `UWUU_S3_PATH_STYLE=false` |
 | `UWUU_S3_ACCESS_KEY` / `UWUU_S3_SECRET_KEY` | s3 only | — | — |
 | `UWUU_S3_PATH_STYLE` | no | `true` | path-style URLs (MinIO/Garage need this) |
+| `UWUU_STORAGE_ENCRYPTION_KEY` | no | — | 64 hex chars (`openssl rand -hex 32`); XChaCha20-Poly1305 at-rest encryption for `files/` + `avatars/`; unset = plaintext |
 | `UWUU_OIDC_ENABLED` | no | `false` | wire up the single generic provider |
 | `UWUU_OIDC_DISCOVERY_URL` | oidc only | — | **issuer** URL, e.g. `https://accounts.google.com` (discovery doc is derived) |
 | `UWUU_OIDC_CLIENT_ID` / `UWUU_OIDC_CLIENT_SECRET` | oidc only | — | — |
@@ -129,6 +130,12 @@ ShareX custom uploader (`DestinationType: ImageUploader, FileUploader`):
 - **Rate limits:** 60 uploads/hr/IP overall, 10/hr/IP anonymous,
   5 auth attempts/min/IP, 20 comment posts/min/IP. Raw file/paste bytes support
   single `Range` requests (206); no resumable uploads.
+- **At-rest encryption (optional):** set `UWUU_STORAGE_ENCRYPTION_KEY` and new
+  objects are sealed before reaching disk/S3, so the provider only ever sees
+  ciphertext. Objects written before enabling still read fine; back the key up
+  with the database — losing it bricks reads, and unsetting it does not
+  decrypt. Seeks on sealed objects cost a full-object fetch (whole-object
+  AEAD), and pastes stay plaintext in Postgres.
 - **Cookies** are `__Host-` prefixed, `HttpOnly+Secure+SameSite=Lax`; use a
   `localhost`/`127.0.0.1` URL (secure contexts) or HTTPS locally.
 
@@ -156,9 +163,8 @@ rsync -a /path/to/UWUU_LOCAL_DIR/ backup/objects/
 For an S3 backend, copy the whole bucket with `aws s3 sync` or `rclone sync`,
 including both the `files/` and `avatars/` prefixes.
 
-Restore in this order: stop the app, restore PostgreSQL, restore the objects,
 then start the app (migrations run on boot). Keep the same
-`UWUU_SESSION_SECRET` and the same S3 credentials:
+`UWUU_SESSION_SECRET`, the same `UWUU_STORAGE_ENCRYPTION_KEY` (if set), and the same S3 credentials:
 
 ```sh
 docker compose stop app

@@ -10,6 +10,7 @@ mod ids;
 mod mail;
 mod metrics;
 mod mime;
+mod object_crypt;
 mod oidc;
 mod range;
 mod ratelimit;

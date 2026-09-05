@@ -34,6 +34,9 @@ pub struct Env {
     pub s3_access_key: Option<String>,
     pub s3_secret_key: Option<String>,
     pub s3_path_style: bool,
+    /// Optional at-rest encryption for object storage (`files/`, `avatars/`).
+    /// `None` = store plaintext (previous behavior). Set = XChaCha20-Poly1305.
+    pub storage_encryption_key: Option<[u8; 32]>,
     pub oidc_enabled: bool,
     pub oidc_discovery_url: Option<String>,
     pub oidc_client_id: Option<String>,
@@ -145,6 +148,15 @@ impl Env {
                 return Err(ConfigError::Missing("UWUU_S3_SECRET_KEY"));
             }
         }
+        // Optional at-rest encryption. Hex, same convention as the session
+        // secret (`openssl rand -hex 32`). Unset = plaintext (default).
+        let storage_encryption_key =
+            match var("UWUU_STORAGE_ENCRYPTION_KEY")? {
+                None => None,
+                Some(raw) => Some(crate::object_crypt::parse_key(&raw).map_err(|detail| {
+                    ConfigError::Invalid("UWUU_STORAGE_ENCRYPTION_KEY", detail)
+                })?),
+            };
 
         let oidc_enabled = flag("UWUU_OIDC_ENABLED", false)?;
         let oidc_discovery_url = var("UWUU_OIDC_DISCOVERY_URL")?;
@@ -210,6 +222,7 @@ impl Env {
             s3_access_key,
             s3_secret_key,
             s3_path_style,
+            storage_encryption_key,
             oidc_enabled,
             oidc_discovery_url,
             oidc_client_id,
