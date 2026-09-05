@@ -94,6 +94,7 @@ pub struct FilePreviewPage {
     pub oembed_url: String,
     pub thumb_url: Option<String>,
     pub og_video_url: Option<String>,
+    pub embed_video: bool,
 }
 
 #[derive(Template)]

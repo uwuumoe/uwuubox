@@ -350,6 +350,7 @@ pub async fn preview(
         sha256_hex: hex::encode(&file.sha256),
         owner_name,
         is_owner,
+        embed_video: crate::mime::is_embeddable_video(&file.mime_stored),
         kind,
         text_snippet,
         raw_url: raw_url.clone(),

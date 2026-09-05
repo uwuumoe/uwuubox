@@ -19,13 +19,20 @@ pub fn sniff_mime(bytes: &[u8]) -> String {
     }
 }
 
-/// Inline allowlist: raster images (no SVG), mp4/webm, any audio, UTF-8 text.
-/// Everything else (`image/svg+xml`, `text/html`, `application/*`, unknown)
-/// forces a download with an octet-stream fallback.
+/// Embeddable video: plays in `<video>`, gets og:video tags and thumbnails.
+/// QuickTime counts: same H.264 payload as mp4 in practice and Safari plays
+/// it natively; crawlers receive it with its real type.
+pub fn is_embeddable_video(mime: &str) -> bool {
+    matches!(mime, "video/mp4" | "video/webm" | "video/quicktime")
+}
+
+/// Inline allowlist: raster images (no SVG), embeddable video, any audio,
+/// UTF-8 text. Everything else (`image/svg+xml`, `text/html`,
+/// `application/*`, unknown) forces a download with an octet-stream fallback.
 pub fn should_inline(mime: &str, bytes: &[u8]) -> bool {
     match mime {
         "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/avif" => true,
-        "video/mp4" | "video/webm" => true,
+        m if is_embeddable_video(m) => true,
         m if m.starts_with("audio/") => true,
         "text/plain" => std::str::from_utf8(bytes).is_ok(),
         _ => false,
@@ -119,5 +126,19 @@ mod tests {
         assert!(should_inline("image/png", &png));
         assert!(should_inline("text/plain", "hello, world".as_bytes()));
         assert!(!should_inline("text/plain", &[0xff, 0xfe, 0x00]));
+    }
+    #[test]
+    fn quicktime_is_first_class_video() {
+        // ftypqt: the classic QuickTime brand infer recognizes.
+        let mov = [
+            0x00, 0x00, 0x00, 0x14, b'f', b't', b'y', b'p', b'q', b't', b' ', b' ', 0, 0, 0, 0,
+        ];
+        assert_eq!(sniff_mime(&mov), "video/quicktime");
+        assert!(is_embeddable_video("video/quicktime"));
+        assert!(is_embeddable_video("video/mp4"));
+        assert!(is_embeddable_video("video/webm"));
+        assert!(!is_embeddable_video("video/x-matroska"));
+        assert!(should_inline("video/quicktime", &mov));
+        assert!(crate::thumb::thumbnailed_mime("video/quicktime"));
     }
 }

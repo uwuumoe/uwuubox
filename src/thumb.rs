@@ -17,9 +17,10 @@ use std::time::Duration;
 /// get the full video regardless.
 pub const EMBED_VIDEO_MAX_BYTES: i64 = 25 * 1024 * 1024;
 
-/// Embeddable video types we thumbnail (ffmpeg-decodable, Discord-playable).
+/// Embeddable video types we thumbnail (ffmpeg-decodable, see
+/// [`crate::mime::is_embeddable_video`]).
 pub fn thumbnailed_mime(mime: &str) -> bool {
-    matches!(mime, "video/mp4" | "video/webm")
+    crate::mime::is_embeddable_video(mime)
 }
 
 /// Link-preview crawlers that fetch embeds with tight size/time budgets.

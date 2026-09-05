@@ -25,7 +25,7 @@
 {% else if raw_url.is_empty() %}
 {% if !icon_url.is_empty() %}<meta property="og:image" content="{{ icon_url }}">{% endif %}
 <meta name="twitter:card" content="summary">
-{% else if file.mime_stored == "video/mp4" || file.mime_stored == "video/webm" %}
+{% else if embed_video %}
 {% match thumb_url %}{% when Some with (t) %}<meta property="og:image" content="{{ t }}">{% when None %}{% endmatch %}
 {% match og_video_url %}
 {% when Some with (v) %}
