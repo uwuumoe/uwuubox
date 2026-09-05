@@ -244,7 +244,7 @@ async fn upload_inner(
         limits.min_expiry_secs,
         limits.default_expiry_secs,
         limits.max_expiry_secs,
-        user.is_some() || cfg.allow_anonymous_never_expiry,
+        cfg.allow_never(user.is_some()),
     )
     .map_err(|_| AppError::bad_request("never expiry is not allowed here"))?;
     let expires_at = lifetime.map(|secs| Utc::now() + chrono::TimeDelta::seconds(secs));

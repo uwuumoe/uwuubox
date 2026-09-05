@@ -264,6 +264,7 @@ pub struct InstanceConfig {
     pub scan_uploads: bool,
     pub block_encrypted_archives: bool,
     pub allow_anonymous_never_expiry: bool,
+    pub allow_never_expiry: bool,
 }
 
 impl Default for InstanceConfig {
@@ -287,6 +288,7 @@ impl Default for InstanceConfig {
             scan_uploads: false,
             block_encrypted_archives: false,
             allow_anonymous_never_expiry: false,
+            allow_never_expiry: true,
         }
     }
 }
@@ -329,6 +331,7 @@ impl InstanceConfig {
             "allow_anonymous_never_expiry",
             cfg.allow_anonymous_never_expiry,
         );
+        cfg.allow_never_expiry = flag("allow_never_expiry", cfg.allow_never_expiry);
         if !get("registration_mode").is_empty() {
             cfg.registration_mode = get("registration_mode").to_string();
         }
@@ -385,6 +388,13 @@ impl InstanceConfig {
         Ok(())
     }
 
+    /// Whether a caller may store content that never expires. The master
+    /// switch gates everyone; anonymous callers additionally need the
+    /// anonymous extension knob.
+    pub fn allow_never(&self, authed: bool) -> bool {
+        self.allow_never_expiry && (authed || self.allow_anonymous_never_expiry)
+    }
+
     pub fn as_pairs(&self) -> Vec<(&'static str, String)> {
         vec![
             ("instance_name", self.instance_name.clone()),
@@ -411,6 +421,7 @@ impl InstanceConfig {
                 "allow_anonymous_never_expiry",
                 self.allow_anonymous_never_expiry.to_string(),
             ),
+            ("allow_never_expiry", self.allow_never_expiry.to_string()),
         ]
     }
 }

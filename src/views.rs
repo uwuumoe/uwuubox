@@ -59,7 +59,7 @@ pub struct IndexPage {
 
 impl IndexPage {
     pub fn new(cfg: &InstanceConfig, user: Option<User>, base_url: &str) -> Self {
-        let show_never = user.is_some() || cfg.allow_anonymous_never_expiry;
+        let show_never = cfg.allow_never(user.is_some());
         Self {
             instance_name: cfg.instance_name.clone(),
             tagline: cfg.tagline.clone(),
@@ -132,7 +132,7 @@ pub struct PasteNewPage {
 
 impl PasteNewPage {
     pub fn new(cfg: &InstanceConfig, user: Option<User>) -> Self {
-        let show_never = user.is_some() || cfg.allow_anonymous_never_expiry;
+        let show_never = cfg.allow_never(user.is_some());
         Self {
             max_paste_bytes: cfg.max_paste_bytes,
             max_expiry_secs: cfg.max_expiry_secs,

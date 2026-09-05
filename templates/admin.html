@@ -36,6 +36,7 @@
 <label class="field inline"><input type="checkbox" name="allow_oidc" value="true" {% if cfg.allow_oidc %}checked{% endif %}> allow_oidc</label>
 <label class="field inline"><input type="checkbox" name="scan_uploads" value="true" {% if cfg.scan_uploads %}checked{% endif %}> scan_uploads</label>
 <label class="field inline"><input type="checkbox" name="allow_anonymous_never_expiry" value="true" {% if cfg.allow_anonymous_never_expiry %}checked{% endif %}> allow_anonymous_never_expiry (anonymous uploads/pastes may use "never")</label>
+<label class="field inline"><input type="checkbox" name="allow_never_expiry" value="true" {% if cfg.allow_never_expiry %}checked{% endif %}> allow_never_expiry (master switch for "never" on uploads/pastes)</label>
 </fieldset>
 <button type="submit">save config</button>
 </form>

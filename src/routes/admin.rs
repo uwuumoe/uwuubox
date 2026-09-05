@@ -161,6 +161,7 @@ pub async fn update_config(
             "allow_anonymous_never_expiry",
             &mut cfg.allow_anonymous_never_expiry,
         ),
+        ("allow_never_expiry", &mut cfg.allow_never_expiry),
     ] {
         *slot = match form.get(key) {
             Some(value) => parse_flag(value)
