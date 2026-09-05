@@ -5243,6 +5243,7 @@ dependencies = [
  "chrono",
  "dotenvy",
  "hex",
+ "http-body 1.1.0",
  "http-body-util",
  "img-parts",
  "infer",

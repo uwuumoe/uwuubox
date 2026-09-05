@@ -183,6 +183,11 @@ pub async fn update_config(
         )
         .await?;
     }
+    // Live cap, not a snapshot: a changed `max_file_bytes` applies to the
+    // next request without a restart (storing an unchanged value is a no-op).
+    state
+        .body_limit
+        .store(cfg.body_limit(), std::sync::atomic::Ordering::Relaxed);
     tracing::info!(?changed_keys, "instance config updated");
     Ok(Redirect::to("/admin").into_response())
 }

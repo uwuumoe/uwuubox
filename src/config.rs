@@ -329,11 +329,15 @@ impl InstanceConfig {
         cfg
     }
 
+    /// Global request-body backstop: the largest file plus multipart framing
+    /// headroom. Evaluated live on every change; the server must never
+    /// snapshot this at boot.
+    pub fn body_limit(&self) -> usize {
+        (self.max_file_bytes + 2 * 1024 * 1024).max(1) as usize
+    }
+
     /// Names the violated inequality on failure (surfaced as 400 by admin UI).
     pub fn validate(&self) -> Result<(), String> {
-        if self.instance_name.is_empty() || self.instance_name.len() > 48 {
-            return Err("instance_name must be 1..=48 chars".into());
-        }
         if self.tagline.len() > 140 {
             return Err("tagline must be <= 140 chars".into());
         }

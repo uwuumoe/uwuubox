@@ -1,6 +1,6 @@
 //! Shared request state.
 
-use std::sync::Arc;
+use std::sync::{atomic::AtomicUsize, Arc};
 
 use sqlx::PgPool;
 
@@ -19,4 +19,8 @@ pub struct AppState {
     pub metrics: Arc<Metrics>,
     pub mailer: Option<Mailer>,
     pub webauthn: Option<Arc<webauthn_rs::Webauthn>>,
+    /// Live request-body cap (see [`InstanceConfig::body_limit`]). Refreshed
+    /// instantly on admin save plus a periodic safety net; read per request,
+    /// so limit changes never need a restart.
+    pub body_limit: Arc<AtomicUsize>,
 }

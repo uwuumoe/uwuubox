@@ -30,18 +30,15 @@ use axum::{
     Router,
 };
 use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
-use tower_http::{limit::RequestBodyLimitLayer, trace::TraceLayer};
+use tower_http::trace::TraceLayer;
 use tower_sessions::SessionManagerLayer;
 use tower_sessions_sqlx_store::PostgresStore;
 
-use crate::state::AppState;
+use crate::{body_limit::DynamicBodyLimitLayer, state::AppState};
 
-pub fn build_router(
-    state: AppState,
-    session_layer: SessionManagerLayer<PostgresStore>,
-    boot_body_limit: usize,
-) -> Router {
+pub fn build_router(state: AppState, session_layer: SessionManagerLayer<PostgresStore>) -> Router {
     let http_metrics = state.metrics.clone();
+    let body_limit = state.body_limit.clone();
     // 60 uploads/hr/IP ceiling; anonymous 10/hr additionally enforced in-handler
     // (authed-vs-anon can't split at the routing layer).
     let upload_governor = {
@@ -206,8 +203,8 @@ pub fn build_router(
         .nest_service("/static", tower_http::services::ServeDir::new("static"))
         // root-raw byte serving: registered last, reserved words guarded.
         .route("/{core}", get(files::raw))
-        .layer(RequestBodyLimitLayer::new(boot_body_limit))
-        // Axum's own 2MB default would shadow the boot limit + per-role caps.
+        .layer(DynamicBodyLimitLayer::new(body_limit))
+        // Axum's own 2MB default would shadow the live limit + per-role caps.
         .layer(DefaultBodyLimit::disable())
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &axum::extract::Request| {

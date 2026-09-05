@@ -1,6 +1,7 @@
 //! Boot: env → pool → migrations → session store → storage → OIDC → router.
 
 mod auth;
+mod body_limit;
 mod config;
 mod db;
 mod error;
@@ -120,7 +121,9 @@ async fn main() {
     let boot_cfg = db::instance_config(&pool)
         .await
         .unwrap_or_else(|e| fatal("instance config unreadable", e));
-    let boot_body_limit = (boot_cfg.max_file_bytes + 2 * 1024 * 1024).max(1) as usize;
+    // Live cap, not a snapshot: admin saves and the refresher keep it current.
+    let body_limit =
+        std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(boot_cfg.body_limit()));
 
     if db::user_count(&pool).await.unwrap_or(1) == 0 {
         tracing::warn!("no users yet: the first registration (local or OIDC) becomes admin");
@@ -144,9 +147,11 @@ async fn main() {
         metrics: metrics.clone(),
         mailer,
         webauthn,
+        body_limit: body_limit.clone(),
     };
-    expiry::spawn(pool, store, metrics);
-    let app = routes::build_router(state, session_layer, boot_body_limit);
+    expiry::spawn(pool.clone(), store, metrics);
+    crate::body_limit::spawn_refresher(pool, body_limit);
+    let app = routes::build_router(state, session_layer);
     let addr = SocketAddr::from(([0, 0, 0, 0], env.port));
     tracing::info!(%addr, base = %env.base_url, "uwuubox listening");
     let listener = tokio::net::TcpListener::bind(addr)
