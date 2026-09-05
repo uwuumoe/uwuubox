@@ -4,7 +4,6 @@ use axum::{
     extract::{Query, State},
     response::Json,
 };
-use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use url::Url;
@@ -95,7 +94,7 @@ pub async fn get(
                 .await
                 .map_err(|error| AppError::from(error).json())?
                 .ok_or(AppError::NotFound.json())?;
-            if file.expires_at <= Utc::now()
+            if db::is_expired(file.expires_at)
                 || !matches!(file.visibility.as_str(), "public" | "unlisted")
             {
                 return Err(AppError::NotFound.json());
@@ -151,7 +150,7 @@ pub async fn get(
                 .await
                 .map_err(|error| AppError::from(error).json())?
                 .ok_or(AppError::NotFound.json())?;
-            if paste.expires_at <= Utc::now()
+            if db::is_expired(paste.expires_at)
                 || !matches!(paste.visibility.as_str(), "public" | "unlisted")
             {
                 return Err(AppError::NotFound.json());

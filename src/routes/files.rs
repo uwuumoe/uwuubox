@@ -10,7 +10,6 @@ use axum::{
     response::{IntoResponse, Json, Response},
 };
 use bytes::Bytes;
-use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::PgPool;
@@ -26,7 +25,7 @@ use crate::{
     routes::common::{check_delete_access, file_kind},
     state::AppState,
     storage::Store,
-    views::{human_bytes, human_time, FilePreviewPage},
+    views::{human_bytes, human_expiry, FilePreviewPage},
 };
 
 const TEXT_PREVIEW_LIMIT: i64 = 262_144;
@@ -39,7 +38,7 @@ async fn load_live_file(state: &AppState, segment: &str) -> Result<FileRow, AppE
     let f = db::find_file(&state.pool, core)
         .await?
         .ok_or(AppError::NotFound)?;
-    if f.expires_at < Utc::now() {
+    if db::is_expired(f.expires_at) {
         return Err(AppError::NotFound);
     }
     Ok(f)
@@ -191,7 +190,7 @@ pub async fn preview(
         icon_url: cfg.icon_url,
         user,
         size_human: human_bytes(file.size_bytes),
-        expires_human: human_time(&file.expires_at),
+        expires_human: human_expiry(&file.expires_at),
         sha256_hex: hex::encode(&file.sha256),
         owner_name,
         is_owner,

@@ -8,7 +8,6 @@ use axum::{
     http::{header::*, HeaderMap, StatusCode},
     response::{IntoResponse, Json, Response},
 };
-use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
 use tower_sessions::Session;
@@ -224,7 +223,7 @@ pub async fn view(
                 let Some(file) = db::find_file(&state.pool, row.core.trim()).await? else {
                     continue;
                 };
-                if file.expires_at <= Utc::now() {
+                if db::is_expired(file.expires_at) {
                     continue;
                 }
                 let mut detail = format!(
@@ -251,7 +250,7 @@ pub async fn view(
                 let Some(paste) = db::find_paste(&state.pool, row.core.trim()).await? else {
                     continue;
                 };
-                if paste.expires_at <= Utc::now() {
+                if db::is_expired(paste.expires_at) {
                     continue;
                 }
                 let mut detail = format!("{} · {}", paste.format, paste.visibility);
@@ -414,7 +413,7 @@ async fn canonical_live_item(
             let file = db::find_file(&state.pool, core)
                 .await?
                 .ok_or(AppError::NotFound)?;
-            if file.expires_at <= Utc::now() {
+            if db::is_expired(file.expires_at) {
                 return Err(AppError::NotFound);
             }
             Ok(("file", file.id_core.trim_end().to_string()))
@@ -424,7 +423,7 @@ async fn canonical_live_item(
             let paste = db::find_paste(&state.pool, core)
                 .await?
                 .ok_or(AppError::NotFound)?;
-            if paste.expires_at <= Utc::now() {
+            if db::is_expired(paste.expires_at) {
                 return Err(AppError::NotFound);
             }
             Ok(("paste", paste.id_core.trim_end().to_string()))

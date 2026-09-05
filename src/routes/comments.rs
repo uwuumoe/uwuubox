@@ -37,7 +37,7 @@ async fn resolve_target(
             let file = db::find_file(&state.pool, core)
                 .await?
                 .ok_or(AppError::NotFound)?;
-            if file.expires_at <= Utc::now() {
+            if db::is_expired(file.expires_at) {
                 return Err(AppError::NotFound);
             }
             let owner = identity
@@ -57,7 +57,7 @@ async fn resolve_target(
             let paste = db::find_paste(&state.pool, core)
                 .await?
                 .ok_or(AppError::NotFound)?;
-            if paste.expires_at <= Utc::now() {
+            if db::is_expired(paste.expires_at) {
                 return Err(AppError::NotFound);
             }
             let owner = identity

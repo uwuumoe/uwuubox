@@ -239,13 +239,15 @@ async fn upload_inner(
 
     let requested = ids::parse_expiry_param(expires_raw.as_deref())
         .map_err(|_| AppError::bad_request("bad expires_in_secs"))?;
-    let secs = ids::clamp_expiry(
+    let lifetime = ids::clamp_expiry(
         requested,
         limits.min_expiry_secs,
         limits.default_expiry_secs,
         limits.max_expiry_secs,
-    );
-    let expires_at = Utc::now() + chrono::TimeDelta::seconds(secs);
+        user.is_some() || cfg.allow_anonymous_never_expiry,
+    )
+    .map_err(|_| AppError::bad_request("never expiry is not allowed here"))?;
+    let expires_at = lifetime.map(|secs| Utc::now() + chrono::TimeDelta::seconds(secs));
 
     let scan_status = if cfg.scan_uploads {
         match scan::verdict_path(&state.env, &filename, &spooled.path, &sniffed).await {

@@ -12,7 +12,6 @@ use axum::{
     Json,
 };
 use bytes::Bytes;
-use chrono::Utc;
 use serde::Deserialize;
 use tower_sessions::Session;
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
@@ -82,7 +81,6 @@ async fn create_inner(
     let cfg = db::instance_config(&state.pool).await?;
     let limits = db::effective_limits(&state.pool, &cfg, user).await?;
 
-    let now = Utc::now();
     let mut total = 0i64;
     let mut files = Vec::with_capacity(request.files.len());
     for requested_core in request.files {
@@ -92,7 +90,7 @@ async fn create_inner(
         }
         let file = db::find_file(&state.pool, core)
             .await?
-            .filter(|file| file.expires_at >= now)
+            .filter(|file| !db::is_expired(file.expires_at))
             .ok_or(AppError::NotFound)?;
         if file.burn_after_read || file.access_password_hash.is_some() {
             return Err(AppError::bad_request(
@@ -120,7 +118,7 @@ async fn create_inner(
         }
         let paste = db::find_paste(&state.pool, core)
             .await?
-            .filter(|paste| paste.expires_at >= now)
+            .filter(|paste| !db::is_expired(paste.expires_at))
             .ok_or(AppError::NotFound)?;
         if paste.burn_after_read || paste.access_password_hash.is_some() {
             return Err(AppError::bad_request(

@@ -263,6 +263,7 @@ pub struct InstanceConfig {
     pub registration_mode: String,
     pub scan_uploads: bool,
     pub block_encrypted_archives: bool,
+    pub allow_anonymous_never_expiry: bool,
 }
 
 impl Default for InstanceConfig {
@@ -285,6 +286,7 @@ impl Default for InstanceConfig {
             registration_mode: "open".into(),
             scan_uploads: false,
             block_encrypted_archives: false,
+            allow_anonymous_never_expiry: false,
         }
     }
 }
@@ -323,6 +325,10 @@ impl InstanceConfig {
         cfg.scan_uploads = flag("scan_uploads", cfg.scan_uploads);
         cfg.block_encrypted_archives =
             flag("block_encrypted_archives", cfg.block_encrypted_archives);
+        cfg.allow_anonymous_never_expiry = flag(
+            "allow_anonymous_never_expiry",
+            cfg.allow_anonymous_never_expiry,
+        );
         if !get("registration_mode").is_empty() {
             cfg.registration_mode = get("registration_mode").to_string();
         }
@@ -400,6 +406,10 @@ impl InstanceConfig {
             (
                 "block_encrypted_archives",
                 self.block_encrypted_archives.to_string(),
+            ),
+            (
+                "allow_anonymous_never_expiry",
+                self.allow_anonymous_never_expiry.to_string(),
             ),
         ]
     }

@@ -67,7 +67,7 @@ pub struct FileRow {
     pub burn_after_read: bool,
     pub access_password_hash: Option<String>,
     pub scan_status: String,
-    pub expires_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
     pub delete_token_hash: Option<String>,
     pub created_at: DateTime<Utc>,
 }
@@ -83,7 +83,7 @@ pub struct PasteRow {
     pub visibility: String,
     pub burn_after_read: bool,
     pub access_password_hash: Option<String>,
-    pub expires_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
     pub delete_token_hash: Option<String>,
     pub created_at: DateTime<Utc>,
 }
@@ -321,10 +321,16 @@ pub async fn own_items(
     Ok((files, pastes))
 }
 
+/// True when a `NULL`-able `expires_at` has passed. `None` (never-expire)
+/// content is never expired.
+pub fn is_expired(expires_at: Option<DateTime<Utc>>) -> bool {
+    expires_at.is_some_and(|at| at < Utc::now())
+}
+
 /// Expired rows (oldest first) for the sweeper.
 pub async fn expired_files(pool: &PgPool, limit: i64) -> Result<Vec<FileRow>, sqlx::Error> {
     sqlx::query_as::<_, FileRow>(
-        "SELECT * FROM files WHERE expires_at < now() ORDER BY expires_at LIMIT $1",
+        "SELECT * FROM files WHERE expires_at IS NOT NULL AND expires_at < now() ORDER BY expires_at LIMIT $1",
     )
     .bind(limit)
     .fetch_all(pool)
@@ -333,7 +339,7 @@ pub async fn expired_files(pool: &PgPool, limit: i64) -> Result<Vec<FileRow>, sq
 
 pub async fn expired_pastes(pool: &PgPool, limit: i64) -> Result<Vec<PasteRow>, sqlx::Error> {
     sqlx::query_as::<_, PasteRow>(
-        "SELECT * FROM pastes WHERE expires_at < now() ORDER BY expires_at LIMIT $1",
+        "SELECT * FROM pastes WHERE expires_at IS NOT NULL AND expires_at < now() ORDER BY expires_at LIMIT $1",
     )
     .bind(limit)
     .fetch_all(pool)
@@ -569,7 +575,7 @@ pub async fn public_feed(
     offset: i64,
 ) -> Result<(Vec<FileRow>, Vec<PasteRow>), sqlx::Error> {
     let files = sqlx::query_as::<_, FileRow>(
-        "SELECT * FROM files WHERE visibility = 'public' AND expires_at > now()
+        "SELECT * FROM files WHERE visibility = 'public' AND (expires_at IS NULL OR expires_at > now())
          ORDER BY created_at DESC LIMIT $1 OFFSET $2",
     )
     .bind(limit)
@@ -577,7 +583,7 @@ pub async fn public_feed(
     .fetch_all(pool)
     .await?;
     let pastes = sqlx::query_as::<_, PasteRow>(
-        "SELECT * FROM pastes WHERE visibility = 'public' AND expires_at > now()
+        "SELECT * FROM pastes WHERE visibility = 'public' AND (expires_at IS NULL OR expires_at > now())
          ORDER BY created_at DESC LIMIT $1 OFFSET $2",
     )
     .bind(limit)

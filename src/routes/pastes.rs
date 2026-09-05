@@ -29,7 +29,7 @@ use crate::{
     range::{self, RangeOutcome},
     routes::common::{check_delete_access, wants_html},
     state::AppState,
-    views::{human_time, PastePage},
+    views::{human_expiry, PastePage},
 };
 
 static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
@@ -147,7 +147,7 @@ struct PasteJson {
     language: Option<String>,
     format: Option<String>,
     visibility: Option<String>,
-    expires_in_secs: Option<i64>,
+    expires_in_secs: Option<serde_json::Value>,
     burn_after_read: Option<bool>,
     access_password: Option<String>,
 }
@@ -169,7 +169,7 @@ struct PasteOut {
     id_core: String,
     preview_url: String,
     raw_url: String,
-    expires_at: chrono::DateTime<Utc>,
+    expires_at: Option<chrono::DateTime<Utc>>,
     delete_token: String,
 }
 
@@ -179,7 +179,7 @@ struct PasteInput {
     language: Option<String>,
     format: Option<String>,
     visibility: Option<String>,
-    expires_in_secs: Option<i64>,
+    expires_in_secs: ids::ExpiryRequest,
     burn_after_read: bool,
     access_password: Option<String>,
 }
@@ -206,7 +206,8 @@ fn parse_input(headers: &HeaderMap, body: &[u8]) -> Result<PasteInput, AppError>
             language: input.language,
             format: input.format,
             visibility: input.visibility,
-            expires_in_secs: input.expires_in_secs,
+            expires_in_secs: ids::parse_expiry_json(input.expires_in_secs.as_ref())
+                .map_err(|_| AppError::bad_request("bad expires_in_secs"))?,
             burn_after_read: input.burn_after_read.unwrap_or(false),
             access_password: input.access_password,
         })
@@ -335,13 +336,15 @@ async fn create_paste_inner(
             Some(auth::hash_password(password).map_err(AppError::bad_request)?)
         }
     };
-    let seconds = ids::clamp_expiry(
+    let lifetime = ids::clamp_expiry(
         input.expires_in_secs,
         limits.min_expiry_secs,
         limits.default_expiry_secs,
         limits.max_expiry_secs,
-    );
-    let expires_at = Utc::now() + chrono::TimeDelta::seconds(seconds);
+        user.is_some() || cfg.allow_anonymous_never_expiry,
+    )
+    .map_err(|_| AppError::bad_request("never expiry is not allowed here"))?;
+    let expires_at = lifetime.map(|secs| Utc::now() + chrono::TimeDelta::seconds(secs));
     let language = (format == "code")
         .then(|| detect_language(input.language.as_deref(), &input.body))
         .flatten();
@@ -409,7 +412,7 @@ pub async fn load_live_paste(state: &AppState, core: &str) -> Result<PasteRow, A
     let paste = db::find_paste(&state.pool, core)
         .await?
         .ok_or(AppError::NotFound)?;
-    if paste.expires_at < Utc::now() {
+    if db::is_expired(paste.expires_at) {
         return Err(AppError::NotFound);
     }
     Ok(paste)
@@ -495,7 +498,7 @@ pub async fn view_paste(
         is_markdown,
         locked,
         burn_after_read: paste.burn_after_read,
-        expires_human: human_time(&paste.expires_at),
+        expires_human: human_expiry(&paste.expires_at),
         owner_name,
         is_owner,
         raw_url,

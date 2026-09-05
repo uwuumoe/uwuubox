@@ -19,6 +19,7 @@
 <option value="86400" selected>24 hours</option>
 {% if max_expiry_secs >= 604800 %}<option value="604800">7 days</option>{% endif %}
 {% if max_expiry_secs >= 2592000 %}<option value="2592000">30 days</option>{% endif %}
+{% if show_never %}<option value="never">never (kept until deleted)</option>{% endif %}
 </select>
 </label>
 <label class="field inline"><input type="checkbox" name="visibility" value="public"> publicly list this upload</label>

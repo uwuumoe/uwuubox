@@ -123,7 +123,11 @@ ShareX custom uploader (`DestinationType: ImageUploader, FileUploader`):
   `text/html`, `application/x-sh`, and Windows/Unix executables are refused
   at upload (`415` naming the MIME).
 - **Expiry:** `expires_in_secs` is clamped to `[min, max]`; a sweeper deletes
-  objects then rows every 5 minutes. No permanent keeps in v1 (max 30 d).
+  objects then rows every 5 minutes. Logged-in users may pass
+  `expires_in_secs=never` (form option, JSON `"never"` or `0`) for files and
+  pastes — stored with no expiry until deleted. Anonymous `never` needs the
+  admin knob `allow_anonymous_never_expiry` (off by default; `never` → `400`
+  otherwise).
 - **Visibility:** unlisted by default; `public` uploads (anonymous or authed,
   subject to role) appear on the `/explore` feed and on `/u/<you>` for authed
   users. Admin routes 404 for non-admins (no account-enumeration oracle).

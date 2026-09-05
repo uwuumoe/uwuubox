@@ -30,6 +30,11 @@ pub fn human_time(dt: &DateTime<Utc>) -> String {
     dt.format("%Y-%m-%d %H:%M UTC").to_string()
 }
 
+/// Display for a nullable expiry: `None` (never-expire) renders as "never".
+pub fn human_expiry(expires_at: &Option<DateTime<Utc>>) -> String {
+    expires_at.as_ref().map(human_time).unwrap_or_else(|| "never".into())
+}
+
 fn brand(cfg: &InstanceConfig) -> (String, String, String) {
     (
         cfg.instance_name.clone(),
@@ -49,10 +54,12 @@ pub struct IndexPage {
     pub max_file_human: String,
     pub base_url: String,
     pub max_expiry_secs: i64,
+    pub show_never: bool,
 }
 
 impl IndexPage {
     pub fn new(cfg: &InstanceConfig, user: Option<User>, base_url: &str) -> Self {
+        let show_never = user.is_some() || cfg.allow_anonymous_never_expiry;
         Self {
             instance_name: cfg.instance_name.clone(),
             tagline: cfg.tagline.clone(),
@@ -62,6 +69,7 @@ impl IndexPage {
             max_file_human: human_bytes(cfg.max_file_bytes),
             base_url: base_url.to_string(),
             max_expiry_secs: cfg.max_expiry_secs,
+            show_never,
         }
     }
 }
@@ -119,13 +127,16 @@ pub struct PasteNewPage {
     pub user: Option<User>,
     pub max_paste_bytes: i64,
     pub max_expiry_secs: i64,
+    pub show_never: bool,
 }
 
 impl PasteNewPage {
     pub fn new(cfg: &InstanceConfig, user: Option<User>) -> Self {
+        let show_never = user.is_some() || cfg.allow_anonymous_never_expiry;
         Self {
             max_paste_bytes: cfg.max_paste_bytes,
             max_expiry_secs: cfg.max_expiry_secs,
+            show_never,
             instance_name: cfg.instance_name.clone(),
             tagline: cfg.tagline.clone(),
             icon_url: cfg.icon_url.clone(),

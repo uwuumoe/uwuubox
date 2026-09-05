@@ -35,7 +35,7 @@
 <label class="field inline"><input type="checkbox" name="allow_local_login" value="true" {% if cfg.allow_local_login %}checked{% endif %}> allow_local_login (password + local registration)</label>
 <label class="field inline"><input type="checkbox" name="allow_oidc" value="true" {% if cfg.allow_oidc %}checked{% endif %}> allow_oidc</label>
 <label class="field inline"><input type="checkbox" name="scan_uploads" value="true" {% if cfg.scan_uploads %}checked{% endif %}> scan_uploads</label>
-<label class="field inline"><input type="checkbox" name="block_encrypted_archives" value="true" {% if cfg.block_encrypted_archives %}checked{% endif %}> block_encrypted_archives</label>
+<label class="field inline"><input type="checkbox" name="allow_anonymous_never_expiry" value="true" {% if cfg.allow_anonymous_never_expiry %}checked{% endif %}> allow_anonymous_never_expiry (anonymous uploads/pastes may use "never")</label>
 </fieldset>
 <button type="submit">save config</button>
 </form>

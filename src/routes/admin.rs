@@ -157,6 +157,10 @@ pub async fn update_config(
             "block_encrypted_archives",
             &mut cfg.block_encrypted_archives,
         ),
+        (
+            "allow_anonymous_never_expiry",
+            &mut cfg.allow_anonymous_never_expiry,
+        ),
     ] {
         *slot = match form.get(key) {
             Some(value) => parse_flag(value)
