@@ -299,13 +299,12 @@ pub async fn preview(
     let thumbnailed = crate::thumb::thumbnailed_mime(&file.mime_stored)
         && !file.burn_after_read
         && file.access_password_hash.is_none();
-    // Crawlers download the whole og:video before embedding; above the
-    // ceiling that always times out, so point them at the thumbnail card.
     // Missing thumbs for old rows backfill in the background: this response
     // stays fast, the crawler's next fetch picks the card up.
-    let large_video =
-        thumbnailed && file.size_bytes > crate::thumb::EMBED_VIDEO_MAX_BYTES;
-    if crawler && large_video && file.thumb_key.is_none() {
+    let large_video = thumbnailed && file.size_bytes > crate::thumb::EMBED_VIDEO_MAX_BYTES;
+    // Crawlers download the whole og:video before embedding; above the
+    // ceiling that always times out, so point them at the thumbnail card.
+    if crawler && thumbnailed && file.thumb_key.is_none() {
         let worker = state.clone();
         let row = file.clone();
         tokio::spawn(async move {
