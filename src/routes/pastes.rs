@@ -503,7 +503,7 @@ pub async fn view_paste(
         is_owner,
         raw_url,
         canonical_url: canonical_url.clone(),
-        oembed_url: format!("/api/oembed?url={canonical_url}"),
+        oembed_url: format!("{}/api/oembed?url={canonical_url}", state.env.base_url),
         desc,
     };
     page.render()

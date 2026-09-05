@@ -2,7 +2,7 @@
 {% block title %}{{ file.original_name }} · {{ instance_name }}{% endblock %}
 {% block head %}
 <link rel="canonical" href="{{ preview_url }}">
-<link rel="alternate" type="application/json+oembed" href="/api/oembed?url={{ preview_url }}" title="{{ file.original_name }}">
+<link rel="alternate" type="application/json+oembed" href="{{ oembed_url }}" title="{{ file.original_name }}">
 <meta property="og:title" content="{{ file.original_name }}">
 <meta property="og:description" content="{{ size_human }} · expires {{ expires_human }} · {{ instance_name }}">
 <meta property="og:type" content="website">

@@ -91,6 +91,7 @@ pub struct FilePreviewPage {
     pub text_snippet: Option<String>,
     pub raw_url: String,
     pub preview_url: String,
+    pub oembed_url: String,
 }
 
 #[derive(Template)]

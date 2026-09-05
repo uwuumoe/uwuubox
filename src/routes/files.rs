@@ -197,7 +197,8 @@ pub async fn preview(
         kind,
         text_snippet,
         raw_url,
-        preview_url,
+        preview_url: preview_url.clone(),
+        oembed_url: format!("{}/api/oembed?url={preview_url}", state.env.base_url),
         file,
     };
     page.render()
