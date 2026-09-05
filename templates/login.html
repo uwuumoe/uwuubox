@@ -6,6 +6,7 @@
 {% match error %}
 {% when Some with (e) %}<p class="notice">{{ e }}</p>
 {% when None %}{% endmatch %}
+{% if local_login_enabled %}
 <form method="post" action="/{{ mode }}">
 <label class="field">username
 <input type="text" name="username" autocomplete="username" minlength="3" maxlength="24" required>
@@ -25,6 +26,7 @@
 </form>
 <p id="passkey-status" class="hint" role="status"></p>
 <p class="hint"><a href="/forgot">forgot your password?</a></p>
+{% endif %}
 {% endif %}
 {% if oidc_enabled %}
 <p><a class="button ghost" href="/oidc/login">continue with single sign-on</a></p>

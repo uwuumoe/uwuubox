@@ -3,6 +3,7 @@
 {% block content %}
 <h1>register</h1>
 {% match error %}{% when Some with (e) %}<p class="error">{{ e }}</p>{% when None %}{% endmatch %}
+{% if local_login_enabled %}
 <form method="post" action="/register">
 <label class="field">username
 <input type="text" name="username" minlength="3" maxlength="24" autocomplete="username" required>
@@ -20,6 +21,7 @@
 {% endif %}
 <button type="submit">create account</button>
 </form>
+{% endif %}
 {% if oidc_enabled %}
 {% if invite_required %}
 <h2>single sign-on</h2>

@@ -62,8 +62,12 @@ pub async fn register_form(State(state): State<AppState>) -> Result<Response, Ap
     if cfg.registration_mode == "closed" {
         return Err(AppError::forbidden("registration is closed"));
     }
+    let oidc_enabled = cfg.allow_oidc && state.oidc.is_some();
+    if !cfg.allow_local_login && !oidc_enabled {
+        return Err(AppError::forbidden("registration is unavailable"));
+    }
     let mut page = views::register_page(&cfg, None);
-    page.oidc_enabled = cfg.allow_oidc && state.oidc.is_some();
+    page.oidc_enabled = oidc_enabled;
     let body = page
         .render()
         .map_err(|e| AppError::internal(e.to_string()))?;
@@ -84,6 +88,9 @@ pub async fn register_post(
     Form(f): Form<RegisterForm>,
 ) -> Result<Response, AppError> {
     let cfg = db::instance_config(&state.pool).await?;
+    if !cfg.allow_local_login {
+        return Err(AppError::forbidden("local registration is disabled"));
+    }
     if cfg.registration_mode == "closed" {
         return Err(AppError::forbidden("registration is closed"));
     }
@@ -165,11 +172,11 @@ pub async fn register_post(
 pub async fn login_form(State(state): State<AppState>) -> Result<Response, AppError> {
     use askama::Template;
     let cfg = db::instance_config(&state.pool).await?;
-    if !cfg.allow_local_login {
-        return Err(AppError::forbidden("local login is disabled"));
-    }
     let mut page = views::login_page(&cfg, None);
     page.oidc_enabled = cfg.allow_oidc && state.oidc.is_some();
+    if !cfg.allow_local_login && !page.oidc_enabled {
+        return Err(AppError::forbidden("login is unavailable"));
+    }
     let body = page
         .render()
         .map_err(|e| AppError::internal(e.to_string()))?;

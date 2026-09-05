@@ -266,6 +266,7 @@ pub struct LoginPage {
     pub mode: &'static str, // "login" | "register"
     pub error: Option<String>,
     pub allow_registration: bool,
+    pub local_login_enabled: bool,
     pub oidc_enabled: bool,
 }
 
@@ -281,6 +282,7 @@ pub fn login_page(cfg: &InstanceConfig, error: Option<String>) -> LoginPage {
         // Legacy allow_registration is deliberately ignored; registration_mode
         // is the source of truth. The field name remains a login-template concern.
         allow_registration: cfg.registration_mode != "closed",
+        local_login_enabled: cfg.allow_local_login,
         oidc_enabled: cfg.allow_oidc,
     }
 }
@@ -294,6 +296,7 @@ pub struct RegisterPage {
     pub user: Option<User>,
     pub error: Option<String>,
     pub invite_required: bool,
+    pub local_login_enabled: bool,
     pub oidc_enabled: bool,
 }
 
@@ -306,6 +309,7 @@ pub fn register_page(cfg: &InstanceConfig, error: Option<String>) -> RegisterPag
         user: None,
         error,
         invite_required: cfg.registration_mode == "invite",
+        local_login_enabled: cfg.allow_local_login,
         oidc_enabled: cfg.allow_oidc,
     }
 }
