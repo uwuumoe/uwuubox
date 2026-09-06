@@ -1,6 +1,6 @@
 {% extends "layout.html" %}
 {% block title %}your uploads · {{ instance_name }}{% endblock %}
-{% block head %}<script src="/static/passkey.js" defer></script>{% endblock %}
+{% block head %}<script src="/static/passkey.js" defer></script><script src="/static/sharex.js" defer></script>{% endblock %}
 {% block content %}
 {% match user %}
 {% when Some with (u) %}
@@ -125,6 +125,30 @@
 </label>
 <button type="submit">create token</button>
 </form>
+<h2>ShareX</h2>
+<p class="hint">download a ready-to-import <code>.sxcu</code> custom uploader (token is embedded as the <code>Authorization</code> header; built locally, never sent anywhere). files need a token with the <code>upload</code> scope, pastes need <code>paste</code>.</p>
+<section id="sharex" data-base-url="{{ base_url }}" data-instance="{{ instance_name }}">
+<label class="field">API token
+<input type="text" id="sharex-token" maxlength="64" autocomplete="off" spellcheck="false" placeholder="uwu_…" value="{% match just_created_token %}{% when Some with (t) %}{{ t }}{% when None %}{% endmatch %}">
+</label>
+<label class="field">visibility
+<select id="sharex-visibility">
+<option value="unlisted" selected>unlisted</option>
+<option value="public">public</option>
+</select>
+</label>
+<label class="field">expiry
+<select id="sharex-expiry">
+<option value="default" selected>server default</option>
+<option value="never">never (logged-in uploads only; instance must allow it)</option>
+</select>
+</label>
+<p>
+<button type="button" id="sharex-files-dl">download files uploader (.sxcu)</button>
+<button type="button" id="sharex-pastes-dl">download pastes uploader (.sxcu)</button>
+</p>
+<p id="sharex-status" class="hint" role="status"></p>
+</section>
 <h2>passkeys</h2>
 {% if passkeys.is_empty() %}<p class="hint">no passkeys registered.</p>{% endif %}
 <ul class="items">

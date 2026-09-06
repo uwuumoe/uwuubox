@@ -96,20 +96,31 @@ HTML forms post to the same endpoints: browsers sending
 `Accept: text/html` get a `303` to the preview page instead of JSON, so the
 site works with JavaScript disabled (JS only adds the progress bar).
 
-ShareX custom uploader (`DestinationType: ImageUploader, FileUploader`):
+ShareX: `/account` → "ShareX" downloads ready-to-import `.sxcu` configs for
+files and pastes (your token is embedded as the `Authorization` header;
+built locally in the browser). Equivalent hand-rolled file uploader
+(`DestinationType: ImageUploader, FileUploader`):
 
 ```json
 {
-  "Name": "uwuubox",
+  "Version": "16.1.0",
+  "Name": "uwuubox files",
+  "DestinationType": "ImageUploader, FileUploader",
   "RequestMethod": "POST",
   "RequestURL": "https://you.host/api/upload",
   "Headers": { "Authorization": "Bearer uwu_paste-token-from-/account" },
   "Body": "MultipartFormData",
+  "Arguments": { "visibility": "unlisted" },
   "FileFormName": "file",
-  "URL": "$json:raw_url$",
-  "ThumbnailURL": "$json:preview_url$"
+  "URL": "{json:raw_url}",
+  "ThumbnailURL": "{json:preview_url}",
+  "ErrorMessage": "{response}"
 }
 ```
+
+The pastes download is a `TextUploader` posting `Body: JSON` to
+`/api/pastes` with `Data: {"body":"{input}","visibility":"unlisted"}` and
+`URL: {json:preview_url}`.
 
 ## Behavior notes
 
