@@ -275,6 +275,22 @@ pub async fn find_paste(pool: &PgPool, core: &str) -> Result<Option<PasteRow>, s
         .fetch_optional(pool)
         .await
 }
+/// Atomically reserve an 8-char content core forever. Returns true when this
+/// caller won the core; false means it was ever issued before (live or
+/// deleted) and the caller must try another candidate. The reservation row
+/// is never deleted, so a core can never resolve to two different contents
+/// over time — including across the file/paste namespaces, which share one
+/// table. Failed uploads/pastes intentionally burn the claimed core.
+pub async fn try_claim_core(pool: &PgPool, core: &str, kind: &str) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "INSERT INTO used_id_cores (core, kind) VALUES ($1, $2) ON CONFLICT (core) DO NOTHING",
+    )
+    .bind(core)
+    .bind(kind)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
 
 pub async fn public_items(
     pool: &PgPool,

@@ -263,11 +263,13 @@ async fn upload_inner(
     // Hashed back off disk so RAM stays flat for multi-GB files.
     let digest = hash_spooled_file(&spooled.path).await?;
 
-    // PK-retry for the 8-char core (2^40 space; 5 tries then 500).
+    // Permanent reservation: claim the core in `used_id_cores` (never
+    // deleted) so it can never be reissued after delete/expiry/burn.
+    // 2^40 space; 5 tries then 500.
     let mut core = String::new();
     for _ in 0..5 {
         let candidate = ids::generate_core();
-        if db::find_file(&state.pool, &candidate).await?.is_none() {
+        if db::try_claim_core(&state.pool, &candidate, "file").await? {
             core = candidate;
             break;
         }

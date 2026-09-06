@@ -349,10 +349,12 @@ async fn create_paste_inner(
         .then(|| detect_language(input.language.as_deref(), &input.body))
         .flatten();
 
+    // Permanent reservation, shared with file cores: a claimed core is never
+    // reissued, even after delete/expiry/burn.
     let mut core = String::new();
     for _ in 0..5 {
         let candidate = ids::generate_core();
-        if db::find_paste(&state.pool, &candidate).await?.is_none() {
+        if db::try_claim_core(&state.pool, &candidate, "paste").await? {
             core = candidate;
             break;
         }
